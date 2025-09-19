@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Production
+dist/
+build/
+
+# Testing
+coverage/
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env*.local
+
+# claude
+.claude/*.local.json
+
+# IDE
+.vscode/

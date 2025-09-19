@@ -1,0 +1,22 @@
+{
+  "lineWidth": 80,
+  "indentWidth": 2,
+  "typescript": {
+    "quoteStyle": "alwaysSingle",
+    "semiColons": "asi",
+    "arrowFunction.useParentheses": "force",
+    "binaryExpression.linePerExpression": false,
+    "module.sortImportDeclarations": "maintain"
+  },
+  "json": {
+  },
+  "includes": ["**/*.{js,jsx,ts,tsx}"],
+  "excludes": [
+    "**/node_modules",
+    "**/*-lock.yaml"
+  ],
+  "plugins": [
+    "https://plugins.dprint.dev/typescript-0.95.3.wasm",
+    "https://plugins.dprint.dev/json-0.20.0.wasm"
+  ]
+}
