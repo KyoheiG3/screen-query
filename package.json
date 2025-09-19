@@ -37,7 +37,8 @@
     "test": "jest --passWithNoTests",
     "format": "dprint fmt",
     "lint": "eslint . --ext .ts,.tsx",
-    "lint:fix": "eslint . --ext .ts,.tsx --fix"
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "prepare": "npm run build"
   },
   "devDependencies": {
     "@tanstack/react-query": "^5.89.0",
