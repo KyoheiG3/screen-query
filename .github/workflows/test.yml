@@ -34,7 +34,7 @@ jobs:
         run: pnpm lint
 
       - name: Type check
-        run: pnpm tsc --noEmit
+        run: pnpm typecheck
 
       - name: Run tests
         run: pnpm test

@@ -33,6 +33,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsc-alias",
     "dev": "tsc -p tsconfig.build.json --watch && tsc-alias --watch",
+    "typecheck": "tsc --noEmit",
     "test": "jest --passWithNoTests",
     "format": "dprint fmt",
     "lint": "eslint . --ext .ts,.tsx",
