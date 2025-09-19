@@ -1,52 +1,12 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { type QueryClient } from '@tanstack/react-query'
 import { renderHook } from '@testing-library/react'
-import React from 'react'
-import { ScreenQueryProvider } from '~/providers/ScreenQueryProvider'
+import {
+  createQueryClient,
+  createQueryClientWrapper,
+  createWrapper,
+  suppressConsoleError,
+} from '~/test-utils/screen-query'
 import { useScreenQueryContext } from './useScreenQueryContext'
-
-/**
- * Create QueryClient for testing
- * Disable retry and gcTime to speed up tests
- */
-const createQueryClient = () => {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        gcTime: 0,
-        staleTime: 0,
-      },
-    },
-  })
-}
-
-/**
- * Create test wrapper wrapped with ScreenQueryProvider
- */
-const createWrapper = (queryClient: QueryClient) => {
-  const Wrapper = ({ children }: { children: React.ReactNode }) =>
-    React.createElement(
-      QueryClientProvider,
-      { client: queryClient },
-      React.createElement(ScreenQueryProvider, null, children),
-    )
-  Wrapper.displayName = 'TestWrapper'
-  return Wrapper
-}
-
-/**
- * Create wrapper with only QueryClientProvider (for testing outside Provider)
- */
-const createWrapperWithoutScreenQuery = (queryClient: QueryClient) => {
-  const Wrapper = ({ children }: { children: React.ReactNode }) =>
-    React.createElement(
-      QueryClientProvider,
-      { client: queryClient },
-      children,
-    )
-  Wrapper.displayName = 'TestWrapperWithoutScreenQuery'
-  return Wrapper
-}
 
 /**
  * Helper to safely catch and return errors
@@ -127,9 +87,18 @@ describe('useScreenQueryContext', () => {
   })
 
   describe('when used outside ScreenQueryProvider', () => {
+    beforeEach(() => {
+      // Suppress console.error for these error tests
+      suppressConsoleError()
+    })
+
+    afterEach(() => {
+      jest.restoreAllMocks()
+    })
+
     it('should throw error with QueryClientProvider only', () => {
       // Given: No ScreenQueryProvider, only QueryClientProvider
-      const wrapper = createWrapperWithoutScreenQuery(queryClient)
+      const wrapper = createQueryClientWrapper(queryClient)
 
       // When: Use hook
       const error = catchError(() => {

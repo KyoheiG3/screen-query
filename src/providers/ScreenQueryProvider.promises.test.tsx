@@ -6,6 +6,7 @@ import {
   createQueryClient,
   createQueryOptions,
   createWrapper,
+  suppressConsoleError,
   useTestScreenQueryContext,
 } from '~/test-utils/screen-query'
 
@@ -13,11 +14,14 @@ describe('ScreenQueryProvider.promises', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
+    // Suppress console.error including React 18 Suspense warnings
+    suppressConsoleError()
     // Given: Initialize new QueryClient
     queryClient = createQueryClient()
   })
 
   afterEach(() => {
+    jest.restoreAllMocks()
     // Cleanup after test
     queryClient.clear()
   })

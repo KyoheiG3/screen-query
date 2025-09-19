@@ -129,3 +129,13 @@ export function useTestScreenQueryContext() {
 export function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
+
+/**
+ * Suppress console.error for intentional error tests and React 18 warnings
+ * Returns a spy instance that can be restored with mockRestore()
+ */
+export function suppressConsoleError(): jest.SpyInstance {
+  return jest.spyOn(console, 'error').mockImplementation(() => {
+    // Suppress all console.error outputs including React 18 Suspense warnings
+  })
+}

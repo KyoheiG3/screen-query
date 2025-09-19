@@ -1,5 +1,8 @@
 import { renderHook, waitFor } from '@testing-library/react'
-import { createQueryClient, createQueryClientWrapper } from '~/test-utils/screen-query'
+import {
+  createQueryClient,
+  createQueryClientWrapper,
+} from '~/test-utils/screen-query'
 import { useQueryKey } from './useQueryKey'
 
 /** @jest-environment jsdom */

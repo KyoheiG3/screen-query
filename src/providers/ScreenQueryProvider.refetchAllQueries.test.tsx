@@ -1,12 +1,10 @@
-import {
-  type QueryClient,
-  useQuery,
-} from '@tanstack/react-query'
+import { type QueryClient, useQuery } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   createQueryClient,
   createQueryOptions,
   createWrapper,
+  suppressConsoleError,
   useTestScreenQueryContext,
 } from '~/test-utils/screen-query'
 
@@ -14,11 +12,14 @@ describe('ScreenQueryProvider.refetchAllQueries', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
+    // Suppress console.error including React 18 Suspense warnings
+    suppressConsoleError()
     // Given: Initialize new QueryClient
     queryClient = createQueryClient()
   })
 
   afterEach(() => {
+    jest.restoreAllMocks()
     // Cleanup after test
     queryClient.clear()
   })
@@ -79,7 +80,7 @@ describe('ScreenQueryProvider.refetchAllQueries', () => {
 
       // Verify that data is actually updated
       const updatedCache = queryClient.getQueryCache().find({
-        queryKey: queryOptions.queryKey
+        queryKey: queryOptions.queryKey,
       })
       expect(updatedCache?.state.data).toEqual({ data: `fetch-${fetchCount}` })
     })

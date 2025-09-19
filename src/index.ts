@@ -7,8 +7,5 @@ export {
 } from './providers/ScreenQueryProvider'
 
 // Hooks
+export { useQueryKey, type UseQueryKeyResult } from './hooks/useQueryKey'
 export { useScreenQueryContext } from './hooks/useScreenQueryContext'
-export {
-  useQueryKey,
-  type UseQueryKeyResult,
-} from './hooks/useQueryKey'

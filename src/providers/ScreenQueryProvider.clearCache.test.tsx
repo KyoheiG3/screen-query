@@ -1,12 +1,10 @@
-import {
-  type QueryClient,
-  useQuery,
-} from '@tanstack/react-query'
+import { type QueryClient, useQuery } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   createQueryClient,
   createQueryOptions,
   createWrapper,
+  suppressConsoleError,
   useTestScreenQueryContext,
 } from '~/test-utils/screen-query'
 
@@ -14,11 +12,14 @@ describe('ScreenQueryProvider.clearCache', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
+    // Suppress console.error including React 18 Suspense warnings
+    suppressConsoleError()
     // Given: Initialize new QueryClient
     queryClient = createQueryClient()
   })
 
   afterEach(() => {
+    jest.restoreAllMocks()
     // Cleanup after test
     queryClient.clear()
   })
@@ -207,7 +208,9 @@ describe('ScreenQueryProvider.clearCache', () => {
         return context
       }
 
-      const { result: newResult } = renderHook(() => TestComponentAfter(), { wrapper })
+      const { result: newResult } = renderHook(() => TestComponentAfter(), {
+        wrapper,
+      })
 
       // Then: New Observers can be created after clearCache and work normally
       await waitFor(() => {
