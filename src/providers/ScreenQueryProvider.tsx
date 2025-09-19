@@ -262,17 +262,22 @@ export function ScreenQueryProvider(
     // Get all Observers
     const allObservers = [...observersRef.current.values()]
 
-    // Check loading state and throw Promise
+    // Check loading state and throw Promise for React Suspense
     if (observerCreated || checkLoadingState(allObservers)) {
+      // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
+      // When React catches this Promise, it will show the fallback UI and re-render when resolved.
+      // This ensures all queries complete before rendering, preventing partial UI updates.
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw createCombinedPromise(allObservers, results)
     }
 
     // Get current Observers
     const currentObservers = registerResult.map((result) => result.observer)
-    // Throw Error if any error exists
+    // Check for errors and throw for React ErrorBoundary
     const error = getQueryError(currentObservers, results)
     if (error) {
+      // React ErrorBoundary pattern: Throwing an Error triggers the nearest ErrorBoundary.
+      // This provides consistent error handling across all queries in the component.
       throw error
     }
 
