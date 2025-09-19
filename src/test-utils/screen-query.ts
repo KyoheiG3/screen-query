@@ -48,7 +48,7 @@ export function createQueryClientWrapper(queryClient: QueryClient) {
 /**
  * Mock data generator function
  */
-export function createMockData<T extends Record<string, any>>(data: T) {
+export function createMockData<T extends Record<string, unknown>>(data: T) {
   return data
 }
 
