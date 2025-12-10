@@ -62,12 +62,18 @@ const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
 Retrieves results for specified queries, throwing Promise during loading, Error on error, or returning data array on success.
 
 ```typescript
-const getQueryResult = (results: readonly ScreenQueryResult[]) => {
+const getQueryResult = (
+  results: readonly ScreenQueryResult[],
+  options?: { suspendOnCreate?: boolean }
+) => {
   // Register or retrieve Observer
-  // Check loading state
+  // Check loading state or suspendOnCreate option
   // Throw Promise or Error, or return data
 }
 ```
+
+**Options**:
+- `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
 
 #### 2. refetchQueries
 Refetches all registered queries. Controls notifications to achieve batch updates.

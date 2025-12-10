@@ -71,17 +71,32 @@ const userQuery = useQueryKey({
 
 // Synchronously retrieve multiple queries
 const [repos, user] = getQueryResult([reposQuery, userQuery])
+
+// With suspendOnCreate option
+const [repos, user] = getQueryResult(
+  [reposQuery, userQuery],
+  { suspendOnCreate: true }
+)
 ```
+
+**Parameters**:
+- `results` - Array of query results from `useQuery` (must include `queryKey`)
+- `options` - Optional configuration
+  - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
 
 **Behavior**:
 - Query is loading → Throws Promise (caught by Suspense)
+- Observer created with `suspendOnCreate: true` → Throws Promise (caught by Suspense)
 - Query has error → Throws Error (caught by ErrorBoundary)
 - Query succeeds → Returns array of data
 
 **Type Signature**:
 ```typescript
 type GetQueryResult = {
-  <T extends readonly ScreenQueryResult[]>(results: [...T]): {
+  <T extends readonly ScreenQueryResult[]>(
+    results: [...T],
+    options?: { suspendOnCreate?: boolean },
+  ): {
     [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never
   }
 }
