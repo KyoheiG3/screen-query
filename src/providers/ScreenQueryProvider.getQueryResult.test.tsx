@@ -152,7 +152,9 @@ describe('ScreenQueryProvider.getQueryResult', () => {
         const context = useTestScreenQueryContext()
 
         try {
-          const [data] = context.getQueryResult([screenQuery])
+          const [data] = context.getQueryResult([screenQuery], {
+            suspendOnCreate: true,
+          })
           return {
             renderCount,
             data,
@@ -178,7 +180,7 @@ describe('ScreenQueryProvider.getQueryResult', () => {
         wrapper,
       })
 
-      // Then: Promise is thrown on initial rendering (new Observer is created even with cache)
+      // Then: Promise is thrown on initial rendering (new Observer is created even with cache, suspendOnCreate: true)
       expect(result.current.renderCount).toBe(1)
       expect(result.current.threwPromise).toBe(true)
       expect(result.current.data).toBeNull()
@@ -222,7 +224,9 @@ describe('ScreenQueryProvider.getQueryResult', () => {
         const context = useTestScreenQueryContext()
 
         try {
-          const [data] = context.getQueryResult([screenQuery])
+          const [data] = context.getQueryResult([screenQuery], {
+            suspendOnCreate: true,
+          })
           return {
             renderCount,
             data,
@@ -251,7 +255,7 @@ describe('ScreenQueryProvider.getQueryResult', () => {
         wrapper,
       })
 
-      // Then: Promise is thrown on initial rendering (even with initial data)
+      // Then: Promise is thrown on initial rendering (even with initial data, suspendOnCreate: true)
       expect(result.current.renderCount).toBe(1)
       expect(result.current.threwPromise).toBe(true)
 
@@ -294,7 +298,9 @@ describe('ScreenQueryProvider.getQueryResult', () => {
         const context = useTestScreenQueryContext()
 
         try {
-          const [data] = context.getQueryResult([screenQuery])
+          const [data] = context.getQueryResult([screenQuery], {
+            suspendOnCreate: true,
+          })
           return {
             renderCount,
             data,
@@ -323,7 +329,7 @@ describe('ScreenQueryProvider.getQueryResult', () => {
         wrapper,
       })
 
-      // Then: Promise is thrown on initial rendering (even with placeholderData)
+      // Then: Promise is thrown on initial rendering (even with placeholderData, suspendOnCreate: true)
       expect(result.current.renderCount).toBe(1)
       expect(result.current.threwPromise).toBe(true)
 
@@ -338,6 +344,40 @@ describe('ScreenQueryProvider.getQueryResult', () => {
       expect(result.current.isPlaceholderData).toBe(true)
       expect(result.current.isFetching).toBe(true)
       expect(result.current.data).toEqual(placeholderData)
+    })
+
+    it('should return cached data immediately on first render when suspendOnCreate is false (default)', () => {
+      // Given: Pre-set data in cache
+      const mockData = createMockUser(10, 'Cached User No Suspend')
+      const queryKey = ['cached-no-suspend-test']
+      queryClient.setQueryData(queryKey, mockData)
+
+      const queryOptions = createQueryOptions(queryKey, mockData, {
+        staleTime: Infinity,
+      })
+
+      const TestComponent = () => {
+        const query = useQuery(queryOptions)
+        const context = useTestScreenQueryContext()
+
+        try {
+          const [data] = context.getQueryResult([{ ...query, ...queryOptions }])
+          return { data, threwPromise: false }
+        } catch (error) {
+          if (error instanceof Promise) {
+            void error.then(() => {})
+            return { data: null, threwPromise: true }
+          }
+          throw error
+        }
+      }
+
+      const wrapper = createWrapper(queryClient)
+      const { result } = renderHook(() => TestComponent(), { wrapper })
+
+      // Then: Cached data is returned immediately (no Promise thrown)
+      expect(result.current.threwPromise).toBe(false)
+      expect(result.current.data).toEqual(mockData)
     })
   })
 
