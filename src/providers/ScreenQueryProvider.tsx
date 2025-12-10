@@ -31,7 +31,10 @@ export type ClearCacheStatus = 'error' | 'all'
  * Throws Promise during loading, throws Error on error, returns data on success.
  */
 type GetQueryResult = {
-  <T extends readonly ScreenQueryResult[]>(results: [...T]): {
+  <T extends readonly ScreenQueryResult[]>(
+    results: [...T],
+    options?: { suspendOnCreate?: boolean },
+  ): {
     [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never
   }
 }
@@ -44,6 +47,9 @@ export type ScreenQueryContextValue = {
   /**
    * Synchronously get results from multiple queries.
    * Integrates with React Suspense/ErrorBoundary for loading and error states.
+   * @param results - Array of query results to fetch
+   * @param options - Optional configuration
+   * @param options.suspendOnCreate - If true, throws Promise when observer is first created (default: false)
    * @throws {Promise} During loading state (handled by Suspense)
    * @throws {Error} When query has error (handled by ErrorBoundary)
    * @returns Array of query data in the same order as input
@@ -249,12 +255,17 @@ export function ScreenQueryProvider(
    * Get results for specified queries
    * Throws Promise if loading, throws Error if error
    * Returns data if successful
-   * @param results - Array of query results and keys to fetch
+   * @param results - Array of query results to fetch
+   * @param options - Optional configuration
+   * @param options.suspendOnCreate - If true, throws Promise when observer is first created (default: false)
    * @returns Array of data
    */
   const getQueryResult = useCallback((
     results: readonly ScreenQueryResult[],
+    options?: { suspendOnCreate?: boolean },
   ) => {
+    const { suspendOnCreate = false } = options ?? {}
+
     // Register queries and get Observers
     const registerResult = registerQueriesAndObservers(results)
     const observerCreated = registerResult.some((result) => result.created)
@@ -263,7 +274,9 @@ export function ScreenQueryProvider(
     const allObservers = [...observersRef.current.values()]
 
     // Check loading state and throw Promise for React Suspense
-    if (observerCreated || checkLoadingState(allObservers)) {
+    if (
+      (suspendOnCreate && observerCreated) || checkLoadingState(allObservers)
+    ) {
       // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
       // When React catches this Promise, it will show the fallback UI and re-render when resolved.
       // This ensures all queries complete before rendering, preventing partial UI updates.

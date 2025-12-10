@@ -104,11 +104,14 @@ function UserProfilePage() {
 
 Returns the context value with the following methods:
 
-#### `getQueryResult(queries)`
+#### `getQueryResult(results, options?)`
 
 Synchronously get results from multiple queries.
 
-- **Parameters**: Array of query results from `useQuery` (must include `queryKey`)
+- **Parameters**:
+  - `results` - Array of query results from `useQuery` (must include `queryKey`)
+  - `options` - Optional configuration
+    - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
 - **Returns**: Array of query data in the same order as input
 - **Throws**:
   - `Promise` during loading state (handled by Suspense)
@@ -119,6 +122,15 @@ const [userData, postsData] = getQueryResult([
   { ...userQuery, queryKey: userQuery.queryKey },
   { ...postsQuery, queryKey: postsQuery.queryKey }
 ])
+
+// With suspendOnCreate option
+const [userData, postsData] = getQueryResult(
+  [
+    { ...userQuery, queryKey: userQuery.queryKey },
+    { ...postsQuery, queryKey: postsQuery.queryKey }
+  ],
+  { suspendOnCreate: true }
+)
 ```
 
 #### `refetchQueries()`
