@@ -166,16 +166,20 @@ type ScreenQuery = {
 }
 ```
 
-### ScreenQueryResult<T>
+### ScreenQueryResult<T, E>
 
 Type that combines React Query's `UseQueryResult` with `ScreenQuery`. Contains both query execution results and identifier.
 
 ```typescript
-export type ScreenQueryResult<T = unknown> = UseQueryResult<T> & ScreenQuery
+export type ScreenQueryResult<T = unknown, E = Error> = UseQueryResult<T, E> & ScreenQuery
 ```
 
+**Type Parameters**:
+- `T`: The type of data returned by the query (default: `unknown`)
+- `E`: The type of error returned by the query (default: `Error`)
+
 **Properties**:
-- All properties from `UseQueryResult<T>`
+- All properties from `UseQueryResult<T, E>`
 - `queryKey`: QueryKey for identification
 
 ### ClearCacheStatus
