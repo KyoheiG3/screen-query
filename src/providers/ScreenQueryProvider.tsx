@@ -12,8 +12,11 @@ import React, { createContext, useCallback, useEffect, useRef } from 'react'
  * Extended query result that includes the query key.
  * Combines TanStack Query's UseQueryResult with query identification.
  * @template T - The type of data returned by the query
+ * @template E - The type of error returned by the query
  */
-export type ScreenQueryResult<T = unknown> = UseQueryResult<T> & ScreenQuery
+export type ScreenQueryResult<T = unknown, E = Error> =
+  & UseQueryResult<T, E>
+  & ScreenQuery
 
 type ScreenQuery = {
   queryKey: QueryKey
