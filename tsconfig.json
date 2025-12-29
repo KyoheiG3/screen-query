@@ -19,17 +19,16 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "verbatimModuleSyntax": true,
-    "baseUrl": "./",
     "rootDir": "./src",
     "outDir": "./dist",
     "paths": {
       "~/*": [
-        "src/*"
+        "./src/*"
       ]
     }
   },
   "include": [
-    "src/**/*"
+    "./src/**/*"
   ],
   "exclude": [
     "node_modules"
