@@ -161,7 +161,7 @@ function createObserverPromise(observer: QueryObserver) {
  * Get query error from Observers or query results.
  * Checks both sources to find any existing error.
  * @param observers - Array of QueryObservers to check
- * @param results - Array of UseQueryResults to check
+ * @param results - Array of QueryObserverBaseResult to check
  * @returns The first error found, or undefined if no errors
  */
 function getQueryError(

@@ -52,8 +52,9 @@ function withQueryKey<T>(result: T, queryKey: QueryKey): WithQueryKey<T> {
  * @example
  * ```tsx
  * // Standard useQuery (requires manual spreading)
- * const query = useQuery({ queryKey: ['user'], queryFn: fetchUser })
- * const [data] = getQueryResult([{ ...query, queryKey: query.queryKey }])
+ * const queryKey = ['user']
+ * const query = useQuery({ queryKey, queryFn: fetchUser })
+ * const [data] = getQueryResult([{ ...query, queryKey }])
  *
  * // With useQueryKey (cleaner)
  * const query = useQueryKey({ queryKey: ['user'], queryFn: fetchUser })
@@ -65,7 +66,7 @@ function withQueryKey<T>(result: T, queryKey: QueryKey): WithQueryKey<T> {
  */
 export function useQueryKey<
   TQueryFnData = unknown,
-  TError = Error,
+  TError = DefaultError,
   TData = TQueryFnData,
   TQueryKey extends QueryKey = QueryKey,
 >(
@@ -84,12 +85,13 @@ export function useQueryKey<
  * @example
  * ```tsx
  * // Standard useInfiniteQuery (requires manual spreading)
+ * const queryKey = ['posts']
  * const query = useInfiniteQuery({
- *   queryKey: ['posts'],
+ *   queryKey,
  *   queryFn: fetchPosts,
  *   getNextPageParam: (lastPage) => lastPage.nextCursor,
  * })
- * const [data] = getQueryResult([{ ...query, queryKey: query.queryKey }])
+ * const [data] = getQueryResult([{ ...query, queryKey }])
  *
  * // With useInfiniteQueryKey (cleaner)
  * const query = useInfiniteQueryKey({
