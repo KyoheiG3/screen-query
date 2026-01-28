@@ -3,8 +3,8 @@ import {
   type QueryClient,
   type QueryKey,
   QueryObserver,
+  type QueryObserverBaseResult,
   useQueryClient,
-  type UseQueryResult,
 } from '@tanstack/react-query'
 import React, { createContext, useCallback, useEffect, useRef } from 'react'
 
@@ -15,7 +15,7 @@ import React, { createContext, useCallback, useEffect, useRef } from 'react'
  * @template E - The type of error returned by the query
  */
 export type ScreenQueryResult<T = unknown, E = Error> =
-  & UseQueryResult<T, E>
+  & QueryObserverBaseResult<T, E>
   & ScreenQuery
 
 type ScreenQuery = {
@@ -107,13 +107,10 @@ function createObserver(
 /**
  * Check loading state of multiple Observers
  * @param observers - Array of Observers to check
- * @returns true if any is loading
+ * @returns true if any is pending, false if all are settled
  */
 function checkLoadingState(observers: QueryObserver[]) {
-  return observers.some((observer) => {
-    const result = observer.getCurrentResult()
-    return result.isLoading || result.isPending
-  })
+  return observers.some((observer) => observer.getCurrentResult().isPending)
 }
 
 /**
@@ -164,12 +161,12 @@ function createObserverPromise(observer: QueryObserver) {
  * Get query error from Observers or query results.
  * Checks both sources to find any existing error.
  * @param observers - Array of QueryObservers to check
- * @param results - Array of UseQueryResults to check
+ * @param results - Array of QueryObserverBaseResult to check
  * @returns The first error found, or undefined if no errors
  */
 function getQueryError(
   observers: readonly QueryObserver[],
-  results: readonly UseQueryResult[],
+  results: readonly QueryObserverBaseResult[],
 ) {
   return observers
     .map((observer) => observer.getCurrentResult())
