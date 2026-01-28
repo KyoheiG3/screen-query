@@ -2,8 +2,8 @@ import {
   notifyManager,
   type QueryClient,
   type QueryKey,
-  type QueryObserverBaseResult,
   QueryObserver,
+  type QueryObserverBaseResult,
   useQueryClient,
 } from '@tanstack/react-query'
 import React, { createContext, useCallback, useEffect, useRef } from 'react'
