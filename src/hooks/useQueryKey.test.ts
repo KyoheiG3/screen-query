@@ -5,8 +5,6 @@ import {
 } from '~/test-utils/screen-query'
 import { useInfiniteQueryKey, useQueryKey } from './useQueryKey'
 
-/** @jest-environment jsdom */
-
 describe('useQueryKey', () => {
   const queryClient = createQueryClient()
   const wrapper = createQueryClientWrapper(queryClient)
@@ -19,13 +17,12 @@ describe('useQueryKey', () => {
     // Given: A standard query configuration
     const queryKey = ['test-key']
     const mockData = { data: 'test' }
-    const queryFn = jest.fn().mockResolvedValue(mockData)
+    const queryFn = vi.fn().mockResolvedValue(mockData)
 
     // When: Hook is used
-    const { result } = renderHook(
-      () => useQueryKey({ queryKey, queryFn }),
-      { wrapper },
-    )
+    const { result } = renderHook(() => useQueryKey({ queryKey, queryFn }), {
+      wrapper,
+    })
 
     // Then: queryKey should be included in the result
     expect(result.current.queryKey).toBe(queryKey)
@@ -50,7 +47,7 @@ describe('useInfiniteQueryKey', () => {
     // Given: An infinite query configuration
     const queryKey = ['infinite-test-key']
     const mockData = { items: ['a', 'b'], nextCursor: null }
-    const queryFn = jest.fn().mockResolvedValue(mockData)
+    const queryFn = vi.fn().mockResolvedValue(mockData)
 
     // When: Hook is used
     const { result } = renderHook(

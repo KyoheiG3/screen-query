@@ -277,14 +277,10 @@ describe('ScreenQueryProvider.getQueryResult', () => {
       const realData = createMockUser(5, 'Real User')
 
       let renderCount = 0
-      const queryOptions = createQueryOptions(
-        ['placeholder-test'],
-        realData,
-        {
-          delay: 1, // Delay fetch so placeholderData is used first
-          placeholderData,
-        },
-      )
+      const queryOptions = createQueryOptions(['placeholder-test'], realData, {
+        delay: 1, // Delay fetch so placeholderData is used first
+        placeholderData,
+      })
 
       const TestComponent = () => {
         renderCount++
@@ -430,13 +426,9 @@ describe('ScreenQueryProvider.getQueryResult', () => {
         staleTime: Infinity,
       }
 
-      const loadingQueryOptions = createQueryOptions(
-        ['loading-query'],
-        null,
-        {
-          isPending: true,
-        },
-      )
+      const loadingQueryOptions = createQueryOptions(['loading-query'], null, {
+        isPending: true,
+      })
 
       let renderCount = 0
       const TestComponent = () => {
@@ -577,11 +569,7 @@ describe('ScreenQueryProvider.getQueryResult', () => {
       expect(result.current.renderCount).toBe(2)
       expect(result.current.threwPromise).toBe(true)
       expect(result.current.dataReceived).toBe(0)
-      expect(result.current.statuses).toEqual([
-        'success',
-        'success',
-        'pending',
-      ])
+      expect(result.current.statuses).toEqual(['success', 'success', 'pending'])
     })
   })
 

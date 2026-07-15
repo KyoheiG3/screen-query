@@ -19,7 +19,7 @@ describe('ScreenQueryProvider.refetchAllQueries', () => {
   })
 
   afterEach(() => {
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
     // Cleanup after test
     queryClient.clear()
   })

@@ -6,7 +6,8 @@ import {
   type QueryObserverBaseResult,
   useQueryClient,
 } from '@tanstack/react-query'
-import React, { createContext, useCallback, useEffect, useRef } from 'react'
+import type React from 'react'
+import { createContext, useCallback, useEffect, useRef } from 'react'
 
 /**
  * Extended query result that includes the query key.
@@ -14,9 +15,11 @@ import React, { createContext, useCallback, useEffect, useRef } from 'react'
  * @template T - The type of data returned by the query
  * @template E - The type of error returned by the query
  */
-export type ScreenQueryResult<T = unknown, E = Error> =
-  & QueryObserverBaseResult<T, E>
-  & ScreenQuery
+export type ScreenQueryResult<T = unknown, E = Error> = QueryObserverBaseResult<
+  T,
+  E
+> &
+  ScreenQuery
 
 type ScreenQuery = {
   queryKey: QueryKey
@@ -33,13 +36,11 @@ export type ClearCacheStatus = 'error' | 'all'
  * Function type for getting query results synchronously.
  * Throws Promise during loading, throws Error on error, returns data on success.
  */
-type GetQueryResult = {
-  <T extends readonly ScreenQueryResult[]>(
-    results: [...T],
-    options?: { suspendOnCreate?: boolean },
-  ): {
-    [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never
-  }
+type GetQueryResult = <T extends readonly ScreenQueryResult[]>(
+  results: [...T],
+  options?: { suspendOnCreate?: boolean },
+) => {
+  [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never
 }
 
 /**
@@ -88,10 +89,7 @@ export const ScreenQueryContext = createContext<
  * @param query - Query to observe
  * @returns New QueryObserver
  */
-function createObserver(
-  queryClient: QueryClient,
-  query: ScreenQuery,
-) {
+function createObserver(queryClient: QueryClient, query: ScreenQuery) {
   const existingQuery = queryClient.getQueryCache().find({
     queryKey: query.queryKey,
     exact: true,
@@ -129,10 +127,7 @@ function getQueryKeyString(query: ScreenQuery) {
  * @returns Sorted pipe-delimited string
  */
 function generateQuerySetKey(queries: readonly ScreenQuery[]) {
-  return queries
-    .map(getQueryKeyString)
-    .sort()
-    .join('|')
+  return queries.map(getQueryKeyString).sort().join('|')
 }
 
 /**
@@ -174,10 +169,12 @@ function getQueryError(
   observers: readonly QueryObserver[],
   results: readonly QueryObserverBaseResult[],
 ) {
-  return observers
-    .map((observer) => observer.getCurrentResult())
-    .find((result) => result.isError && result.data === undefined)?.error
-    ?? results.find((q) => q.isError && q.data === undefined)?.error
+  return (
+    observers
+      .map((observer) => observer.getCurrentResult())
+      .find((result) => result.isError && result.data === undefined)?.error ??
+    results.find((q) => q.isError && q.data === undefined)?.error
+  )
 }
 
 /**
@@ -196,9 +193,11 @@ function getQueryError(
  * @param props - Component props
  * @param props.children - Child components to wrap
  */
-export function ScreenQueryProvider(
-  { children }: { children: React.ReactNode },
-) {
+export function ScreenQueryProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   const queryClient = useQueryClient()
   const queriesRef = useRef<Map<string, ScreenQuery>>(new Map())
   const observersRef = useRef<Map<string, QueryObserver>>(new Map())
@@ -209,25 +208,26 @@ export function ScreenQueryProvider(
    * @param queries - Array of queries to register
    * @returns Registration result for each query (creation flag and Observer)
    */
-  const registerQueriesAndObservers = useCallback((
-    queries: readonly ScreenQuery[],
-  ) => {
-    return queries.map((query) => {
-      const keyString = getQueryKeyString(query)
+  const registerQueriesAndObservers = useCallback(
+    (queries: readonly ScreenQuery[]) => {
+      return queries.map((query) => {
+        const keyString = getQueryKeyString(query)
 
-      // Save query to Map
-      queriesRef.current.set(keyString, query)
+        // Save query to Map
+        queriesRef.current.set(keyString, query)
 
-      // Check for existing Observer, create new if none
-      const currentObserver = observersRef.current.get(keyString)
-      const observer = currentObserver ?? createObserver(queryClient, query)
-      if (!currentObserver) {
-        observersRef.current.set(keyString, observer)
-      }
+        // Check for existing Observer, create new if none
+        const currentObserver = observersRef.current.get(keyString)
+        const observer = currentObserver ?? createObserver(queryClient, query)
+        if (!currentObserver) {
+          observersRef.current.set(keyString, observer)
+        }
 
-      return { created: !currentObserver, observer }
-    })
-  }, [queryClient])
+        return { created: !currentObserver, observer }
+      })
+    },
+    [queryClient],
+  )
 
   /**
    * Create or get Promise that waits for all Observers in the specified query set to complete
@@ -236,26 +236,26 @@ export function ScreenQueryProvider(
    * @param queries - Corresponding query array (for key generation)
    * @returns Promise that waits for all Observers to complete
    */
-  const createCombinedPromise = useCallback((
-    observers: readonly QueryObserver[],
-    queries: readonly ScreenQuery[],
-  ) => {
-    const querySetKey = generateQuerySetKey(queries)
+  const createCombinedPromise = useCallback(
+    (observers: readonly QueryObserver[], queries: readonly ScreenQuery[]) => {
+      const querySetKey = generateQuerySetKey(queries)
 
-    // Check for existing Promise for the same query set
-    const existingPromise = queryPromiseRef.current.get(querySetKey)
-    // Create new Promise if none exists
-    const combinedPromise = existingPromise ?? Promise
-      .all(observers.map(createObserverPromise))
-      .then(() => {
-        queryPromiseRef.current.delete(querySetKey)
-      })
-    if (!existingPromise) {
-      queryPromiseRef.current.set(querySetKey, combinedPromise)
-    }
+      // Check for existing Promise for the same query set
+      const existingPromise = queryPromiseRef.current.get(querySetKey)
+      // Create new Promise if none exists
+      const combinedPromise =
+        existingPromise ??
+        Promise.all(observers.map(createObserverPromise)).then(() => {
+          queryPromiseRef.current.delete(querySetKey)
+        })
+      if (!existingPromise) {
+        queryPromiseRef.current.set(querySetKey, combinedPromise)
+      }
 
-    return combinedPromise
-  }, [])
+      return combinedPromise
+    },
+    [],
+  )
 
   /**
    * Get results for specified queries
@@ -266,43 +266,46 @@ export function ScreenQueryProvider(
    * @param options.suspendOnCreate - If true, throws Promise when observer is first created (default: false)
    * @returns Array of data
    */
-  const getQueryResult = useCallback((
-    results: readonly ScreenQueryResult[],
-    options?: { suspendOnCreate?: boolean },
-  ) => {
-    const { suspendOnCreate = false } = options ?? {}
+  const getQueryResult = useCallback(
+    (
+      results: readonly ScreenQueryResult[],
+      options?: { suspendOnCreate?: boolean },
+    ) => {
+      const { suspendOnCreate = false } = options ?? {}
 
-    // Register queries and get Observers
-    const registerResult = registerQueriesAndObservers(results)
-    const observerCreated = registerResult.some((result) => result.created)
+      // Register queries and get Observers
+      const registerResult = registerQueriesAndObservers(results)
+      const observerCreated = registerResult.some((result) => result.created)
 
-    // Get all Observers
-    const allObservers = [...observersRef.current.values()]
+      // Get all Observers
+      const allObservers = [...observersRef.current.values()]
 
-    // Check loading state and throw Promise for React Suspense
-    if (
-      (suspendOnCreate && observerCreated) || checkLoadingState(allObservers)
-    ) {
-      // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
-      // When React catches this Promise, it will show the fallback UI and re-render when resolved.
-      // This ensures all queries complete before rendering, preventing partial UI updates.
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw createCombinedPromise(allObservers, results)
-    }
+      // Check loading state and throw Promise for React Suspense
+      if (
+        (suspendOnCreate && observerCreated) ||
+        checkLoadingState(allObservers)
+      ) {
+        // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
+        // When React catches this Promise, it will show the fallback UI and re-render when resolved.
+        // This ensures all queries complete before rendering, preventing partial UI updates.
+        throw createCombinedPromise(allObservers, results)
+      }
 
-    // Get current Observers
-    const currentObservers = registerResult.map((result) => result.observer)
-    // Check for errors and throw for React ErrorBoundary
-    const error = getQueryError(currentObservers, results)
-    if (error) {
-      // React ErrorBoundary pattern: Throwing an Error triggers the nearest ErrorBoundary.
-      // This provides consistent error handling across all queries in the component.
-      throw error
-    }
+      // Get current Observers
+      const currentObservers = registerResult.map((result) => result.observer)
+      // Check for errors and throw for React ErrorBoundary
+      const error = getQueryError(currentObservers, results)
+      if (error) {
+        // React ErrorBoundary pattern: Throwing an Error triggers the nearest ErrorBoundary.
+        // This provides consistent error handling across all queries in the component.
+        throw error
+      }
 
-    // Return data
-    return results.map((q) => q.data)
-  }, [registerQueriesAndObservers, createCombinedPromise]) as GetQueryResult
+      // Return data
+      return results.map((q) => q.data)
+    },
+    [registerQueriesAndObservers, createCombinedPromise],
+  ) as GetQueryResult
 
   /**
    * Refetch all registered queries
@@ -322,7 +325,7 @@ export function ScreenQueryProvider(
           queryClient.refetchQueries({
             queryKey: query.queryKey,
             exact: true,
-          })
+          }),
         ),
       )
     } finally {
@@ -335,36 +338,43 @@ export function ScreenQueryProvider(
    * Clear query cache and reset Observers
    * @param status - 'error': Clear only error state queries / 'all': Clear all queries
    */
-  const clearCache = useCallback(async (status: ClearCacheStatus) => {
-    // Get queries to clear based on status
-    const queries = [...observersRef.current.values()]
-      .map((observer) => observer.getCurrentQuery())
-      .filter((query) => status === 'all' || query.state.status === status)
+  const clearCache = useCallback(
+    async (status: ClearCacheStatus) => {
+      // Get queries to clear based on status
+      const queries = [...observersRef.current.values()]
+        .map((observer) => observer.getCurrentQuery())
+        .filter((query) => status === 'all' || query.state.status === status)
 
-    // Destroy and clear all Observers
-    observersRef.current.forEach((observer) => observer.destroy())
-    observersRef.current.clear()
-    // Don't clear queriesRef (not for disposal)
+      // Destroy and clear all Observers
+      observersRef.current.forEach((observer) => {
+        observer.destroy()
+      })
+      observersRef.current.clear()
+      // Don't clear queriesRef (not for disposal)
 
-    // Reset query cache (parallel execution)
-    await notifyManager.batch(() =>
-      Promise.all(
-        queries.map((query) =>
-          queryClient.resetQueries({
-            queryKey: query.queryKey,
-            exact: true,
-          })
+      // Reset query cache (parallel execution)
+      await notifyManager.batch(() =>
+        Promise.all(
+          queries.map((query) =>
+            queryClient.resetQueries({
+              queryKey: query.queryKey,
+              exact: true,
+            }),
+          ),
         ),
       )
-    )
-  }, [queryClient])
+    },
+    [queryClient],
+  )
 
   // Clean up all Observers when Provider unmounts
   useEffect(() => {
     const currentObservers = observersRef.current
     return () => {
       // Destroy all Observers
-      currentObservers.forEach((observer) => observer.destroy())
+      currentObservers.forEach((observer) => {
+        observer.destroy()
+      })
     }
   }, [])
 

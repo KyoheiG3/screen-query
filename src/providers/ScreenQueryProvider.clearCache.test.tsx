@@ -19,7 +19,7 @@ describe('ScreenQueryProvider.clearCache', () => {
   })
 
   afterEach(() => {
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
     // Cleanup after test
     queryClient.clear()
   })

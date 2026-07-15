@@ -2,10 +2,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "target": "ESNext",
-    "lib": [
-      "ESNext",
-      "DOM"
-    ],
+    "lib": ["ESNext", "DOM"],
     "module": "preserve",
     "moduleDetection": "force",
     "moduleResolution": "bundler",
@@ -19,18 +16,13 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "verbatimModuleSyntax": true,
+    "types": ["vitest/globals"],
     "rootDir": "./src",
     "outDir": "./dist",
     "paths": {
-      "~/*": [
-        "./src/*"
-      ]
+      "~/*": ["./src/*"]
     }
   },
-  "include": [
-    "./src/**/*"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["./src/**/*"],
+  "exclude": ["node_modules"]
 }

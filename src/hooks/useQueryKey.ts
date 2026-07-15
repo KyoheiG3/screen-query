@@ -20,16 +20,20 @@ type WithQueryKey<T> = T & { queryKey: QueryKey }
  * @template TData - The type of data returned by the query
  * @template TError - The type of error returned by the query
  */
-export type UseQueryKeyResult<TData = unknown, TError = DefaultError> =
-  WithQueryKey<UseQueryResult<TData, TError>>
+export type UseQueryKeyResult<
+  TData = unknown,
+  TError = DefaultError,
+> = WithQueryKey<UseQueryResult<TData, TError>>
 
 /**
  * Extended UseInfiniteQueryResult type that includes queryKey.
  * @template TData - The type of data returned by the query
  * @template TError - The type of error returned by the query
  */
-export type UseInfiniteQueryKeyResult<TData = unknown, TError = DefaultError> =
-  WithQueryKey<UseInfiniteQueryResult<TData, TError>>
+export type UseInfiniteQueryKeyResult<
+  TData = unknown,
+  TError = DefaultError,
+> = WithQueryKey<UseInfiniteQueryResult<TData, TError>>
 
 /**
  * Helper function that adds queryKey to a result object.

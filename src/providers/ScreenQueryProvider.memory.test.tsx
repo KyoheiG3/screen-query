@@ -78,7 +78,7 @@ describe('ScreenQueryProvider.memory', () => {
 
     it('should call destroy on all observers during provider cleanup', () => {
       // Given: Spy on destroy method
-      const destroySpy = jest.spyOn(QueryObserver.prototype, 'destroy')
+      const destroySpy = vi.spyOn(QueryObserver.prototype, 'destroy')
 
       const TestComponent = () => {
         useQuery(createQueryOptions(['destroy-test-1'], 'data1'))
@@ -140,14 +140,16 @@ describe('ScreenQueryProvider.memory', () => {
       // Verify that garbage collection is in an executable state
       const cache = queryClient.getQueryCache()
       const remainingQueries = cache.getAll()
-      expect(remainingQueries.some((q) => q.queryKey[0] === 'pending-cleanup'))
-        .toBe(true)
+      expect(
+        remainingQueries.some((q) => q.queryKey[0] === 'pending-cleanup'),
+      ).toBe(true)
     })
 
     it('should handle rapid mount/unmount without errors', async () => {
       // Given: Function to catch errors
       const errors: Error[] = []
-      const originalConsoleError = jest.spyOn(console, 'error')
+      const originalConsoleError = vi
+        .spyOn(console, 'error')
         .mockImplementation((error: Error) => {
           errors.push(error)
         })
