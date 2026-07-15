@@ -100,6 +100,37 @@ function UserProfilePage() {
 
 ## API Reference
 
+### `useQueryKey(options)` / `useInfiniteQueryKey(options)`
+
+Wrapper hooks around `useQuery` / `useInfiniteQuery` that automatically include `queryKey` in the return value, so results can be passed straight to `getQueryResult` without manual spreading.
+
+```tsx
+import { useQueryKey } from 'screen-query'
+
+// Without useQueryKey (manual spreading)
+const query = useQuery({ queryKey: ['user', userId], queryFn: () => fetchUser(userId) })
+const [user] = getQueryResult([{ ...query, queryKey: query.queryKey }])
+
+// With useQueryKey (recommended)
+const query = useQueryKey({ queryKey: ['user', userId], queryFn: () => fetchUser(userId) })
+const [user] = getQueryResult([query])
+```
+
+`useInfiniteQueryKey` works the same way for infinite queries:
+
+```tsx
+import { useInfiniteQueryKey } from 'screen-query'
+
+const posts = useInfiniteQueryKey({
+  queryKey: ['posts'],
+  queryFn: fetchPosts,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+})
+const [postsData] = getQueryResult([posts])
+```
+
+- **Returns**: the standard `useQuery` / `useInfiniteQuery` result plus a `queryKey` property (`UseQueryKeyResult` / `UseInfiniteQueryKeyResult`)
+
 ### `useScreenQueryContext()`
 
 Returns the context value with the following methods:
@@ -206,8 +237,9 @@ The library is fully typed. Key types are exported:
 ```typescript
 import type {
   ScreenQueryResult,
-  ScreenQueryContextValue,
-  ClearCacheStatus
+  ClearCacheStatus,
+  UseQueryKeyResult,
+  UseInfiniteQueryKeyResult
 } from 'screen-query'
 ```
 
