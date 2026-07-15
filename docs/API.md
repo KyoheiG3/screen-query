@@ -52,6 +52,48 @@ export function useQueryKey<
 - Ensures `queryKey` is always included
 - Type-safe and maintains all `useQuery` functionality
 
+### useInfiniteQueryKey
+
+A wrapper hook around `useInfiniteQuery` that automatically includes `queryKey` in the return value, mirroring `useQueryKey` for infinite queries.
+
+```typescript
+// Standard useInfiniteQuery (requires manual spreading)
+const query = useInfiniteQuery({
+  queryKey: ['posts'],
+  queryFn: fetchPosts,
+  getNextPageParam: (lastPage) => lastPage.nextCursor
+})
+const [posts] = getQueryResult([
+  { ...query, queryKey: query.queryKey }
+])
+
+// With useInfiniteQueryKey (cleaner, recommended)
+const query = useInfiniteQueryKey({
+  queryKey: ['posts'],
+  queryFn: fetchPosts,
+  getNextPageParam: (lastPage) => lastPage.nextCursor
+})
+const [posts] = getQueryResult([query])
+```
+
+**Type Signature**:
+```typescript
+export type UseInfiniteQueryKeyResult<TData = unknown, TError = Error> =
+  UseInfiniteQueryResult<TData, TError> & { queryKey: QueryKey }
+
+export function useInfiniteQueryKey<
+  TQueryFnData,
+  TError = Error,
+  TData = InfiniteData<TQueryFnData>,
+  TQueryKey extends QueryKey = QueryKey,
+  TPageParam = unknown,
+>(
+  options: UseInfiniteQueryOptions<
+    TQueryFnData, TError, TData, TQueryKey, TPageParam
+  >
+): UseInfiniteQueryKeyResult<TData, TError>
+```
+
 ### getQueryResult
 
 Function that synchronously waits for multiple queries and returns data. Integrated with Suspense/ErrorBoundary.
