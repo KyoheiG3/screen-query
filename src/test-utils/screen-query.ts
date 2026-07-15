@@ -23,7 +23,6 @@ export function createQueryClient() {
  * Create wrapper component for testing with ScreenQueryProvider
  */
 export function createWrapper(queryClient: QueryClient) {
-  // eslint-disable-next-line react/display-name
   return ({ children }: { children: React.ReactNode }) =>
     React.createElement(
       QueryClientProvider,
@@ -36,13 +35,8 @@ export function createWrapper(queryClient: QueryClient) {
  * Create wrapper component with only QueryClientProvider (no ScreenQueryProvider)
  */
 export function createQueryClientWrapper(queryClient: QueryClient) {
-  // eslint-disable-next-line react/display-name
   return ({ children }: { children: React.ReactNode }) =>
-    React.createElement(
-      QueryClientProvider,
-      { client: queryClient },
-      children,
-    )
+    React.createElement(QueryClientProvider, { client: queryClient }, children)
 }
 
 /**
@@ -134,8 +128,8 @@ export function delay(ms: number) {
  * Suppress console.error for intentional error tests and React 18 warnings
  * Returns a spy instance that can be restored with mockRestore()
  */
-export function suppressConsoleError(): jest.SpyInstance {
-  return jest.spyOn(console, 'error').mockImplementation(() => {
+export function suppressConsoleError() {
+  return vi.spyOn(console, 'error').mockImplementation(() => {
     // Suppress all console.error outputs including React 18 Suspense warnings
   })
 }

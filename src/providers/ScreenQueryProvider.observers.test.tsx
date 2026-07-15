@@ -23,7 +23,7 @@ describe('ScreenQueryProvider.observers', () => {
   })
 
   afterEach(() => {
-    jest.restoreAllMocks()
+    vi.restoreAllMocks()
     // Cleanup after test
     queryClient.clear()
   })
@@ -31,7 +31,7 @@ describe('ScreenQueryProvider.observers', () => {
   describe('Observer Management', () => {
     it('should create observer for new queries', async () => {
       // Given: Check that QueryObserver is created
-      const observerSpy = jest.spyOn(QueryObserver.prototype, 'subscribe')
+      const observerSpy = vi.spyOn(QueryObserver.prototype, 'subscribe')
 
       const queryOptions = createQueryOptions(['observer-create'], 'test-data')
 
@@ -128,7 +128,7 @@ describe('ScreenQueryProvider.observers', () => {
       })
 
       // Spy on QueryObserver destroy
-      const destroySpy = jest.spyOn(QueryObserver.prototype, 'destroy')
+      const destroySpy = vi.spyOn(QueryObserver.prototype, 'destroy')
 
       // When: Unmount component
       unmount()

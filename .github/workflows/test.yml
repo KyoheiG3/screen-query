@@ -27,11 +27,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Check formatting
-        run: pnpm dprint check
-
-      - name: Run linting
-        run: pnpm lint
+      - name: Lint & format check
+        run: pnpm check
 
       - name: Type check
         run: pnpm typecheck

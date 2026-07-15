@@ -1,4 +1,4 @@
-import { type QueryClient } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import { renderHook } from '@testing-library/react'
 import {
   createQueryClient,
@@ -53,10 +53,9 @@ describe('useScreenQueryContext', () => {
       const wrapper = createWrapper(queryClient)
 
       // When: Use hook and re-render
-      const { result, rerender } = renderHook(
-        () => useScreenQueryContext(),
-        { wrapper },
-      )
+      const { result, rerender } = renderHook(() => useScreenQueryContext(), {
+        wrapper,
+      })
 
       const firstContext = result.current
       rerender()
@@ -73,10 +72,13 @@ describe('useScreenQueryContext', () => {
       const wrapper = createWrapper(queryClient)
 
       // When: Use hook for type checking
-      const { result } = renderHook(() => {
-        const context = useScreenQueryContext()
-        return context
-      }, { wrapper })
+      const { result } = renderHook(
+        () => {
+          const context = useScreenQueryContext()
+          return context
+        },
+        { wrapper },
+      )
 
       // Then: Types are correctly defined
       expect(result.current).toBeDefined()
@@ -93,7 +95,7 @@ describe('useScreenQueryContext', () => {
     })
 
     afterEach(() => {
-      jest.restoreAllMocks()
+      vi.restoreAllMocks()
     })
 
     it('should throw error with QueryClientProvider only', () => {
@@ -130,6 +132,7 @@ describe('useScreenQueryContext', () => {
       // Given: Use outside Provider
       const { result } = renderHook(() => {
         try {
+          // biome-ignore lint/correctness/useHookAtTopLevel: intentionally called inside try to assert it throws
           return useScreenQueryContext()
         } catch (error) {
           if (error instanceof Error) {

@@ -1,4 +1,4 @@
-import { type QueryClient } from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
 import { renderHook } from '@testing-library/react'
 import React from 'react'
 import {
@@ -27,10 +27,9 @@ describe('ScreenQueryProvider', () => {
       const wrapper = createWrapper(queryClient)
 
       // When: Get context
-      const { result } = renderHook(
-        () => useTestScreenQueryContext(),
-        { wrapper },
-      )
+      const { result } = renderHook(() => useTestScreenQueryContext(), {
+        wrapper,
+      })
 
       // Then: Required functions are provided
       expect(result.current).toBeDefined()
