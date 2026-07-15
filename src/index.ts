@@ -1,8 +1,12 @@
-// Provider
-
 // Hooks
-export { type UseQueryKeyResult, useQueryKey } from './hooks/useQueryKey'
+export {
+  type UseInfiniteQueryKeyResult,
+  type UseQueryKeyResult,
+  useInfiniteQueryKey,
+  useQueryKey,
+} from './hooks/useQueryKey'
 export { useScreenQueryContext } from './hooks/useScreenQueryContext'
+// Provider
 export {
   type ClearCacheStatus,
   ScreenQueryContext,
