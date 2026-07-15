@@ -4,11 +4,26 @@
   "description": "React Query integration for synchronous multi-query management with Suspense/ErrorBoundary",
   "author": "KyoheiG3",
   "license": "MIT",
-  "engines": {
-    "npm": "please use pnpm instead"
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
   "files": [
     "dist"
   ],
@@ -31,8 +46,9 @@
     "typescript"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsc-alias",
-    "dev": "tsc -p tsconfig.build.json --watch && tsc-alias --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "prepublishOnly": "pnpm build",
     "typecheck": "tsc --noEmit",
     "test": "jest --passWithNoTests",
     "format": "dprint fmt",
@@ -55,7 +71,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "ts-jest": "^29.4.3",
-    "tsc-alias": "^1.8.16",
+    "tsdown": "^0.22.7",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.44.0"
   },
