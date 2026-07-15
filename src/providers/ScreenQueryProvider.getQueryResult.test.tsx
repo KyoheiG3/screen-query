@@ -632,4 +632,59 @@ describe('ScreenQueryProvider.getQueryResult', () => {
       })
     })
   })
+
+  describe('when query is in error state but has existing data', () => {
+    it('should not throw and should return existing data (e.g. failed refetch/fetchNextPage)', async () => {
+      // Given: A query that already has data but whose latest fetch failed.
+      // This is the state a query lands in when a background refetch or an
+      // infinite query's fetchNextPage fails: query.state.status becomes
+      // 'error' (so the observer reports isError) while the previously fetched
+      // data is retained.
+      const mockData = createMockUser(1, 'Cached User')
+      const mockError = new Error('Refetch failed')
+      const queryKey = ['error-with-data']
+
+      // Seed successful data, then force an error while retaining that data.
+      queryClient.setQueryData(queryKey, mockData)
+      await queryClient
+        .fetchQuery({
+          queryKey,
+          queryFn: () => Promise.reject(mockError),
+          retry: false,
+        })
+        .catch(() => {})
+
+      const TestComponent = () => {
+        // enabled: false so mounting does not refetch and clear the error state
+        const query = useQuery({
+          queryKey,
+          queryFn: () => Promise.resolve(mockData),
+          enabled: false,
+        })
+
+        const context = useTestScreenQueryContext()
+
+        try {
+          const [data] = context.getQueryResult([{ ...query, queryKey }])
+          return { status: 'data', data, isError: query.isError }
+        } catch (error) {
+          if (error instanceof Promise) {
+            void error.then(() => {})
+            return { status: 'loading', data: null, isError: query.isError }
+          }
+          return { status: 'error', data: null, isError: query.isError }
+        }
+      }
+
+      const wrapper = createWrapper(queryClient)
+      const { result } = renderHook(() => TestComponent(), { wrapper })
+
+      // Then: The query reports an error but still holds data, so the error is
+      // NOT thrown to the ErrorBoundary and the existing data is returned
+      // (matches useSuspenseInfiniteQuery's default throwOnError behavior).
+      expect(result.current.isError).toBe(true)
+      expect(result.current.status).toBe('data')
+      expect(result.current.data).toEqual(mockData)
+    })
+  })
 })

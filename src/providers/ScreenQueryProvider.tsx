@@ -160,6 +160,12 @@ function createObserverPromise(observer: QueryObserver) {
 /**
  * Get query error from Observers or query results.
  * Checks both sources to find any existing error.
+ *
+ * Only errors without existing data are returned, mirroring the default
+ * `throwOnError` of useSuspenseQuery/useSuspenseInfiniteQuery
+ * (`query.state.data === undefined`). This keeps partial data visible when a
+ * refetch or fetchNextPage fails, instead of tearing down the screen via the
+ * ErrorBoundary.
  * @param observers - Array of QueryObservers to check
  * @param results - Array of QueryObserverBaseResult to check
  * @returns The first error found, or undefined if no errors
@@ -170,8 +176,8 @@ function getQueryError(
 ) {
   return observers
     .map((observer) => observer.getCurrentResult())
-    .find((result) => result.isError)?.error
-    ?? results.find((q) => q.isError)?.error
+    .find((result) => result.isError && result.data === undefined)?.error
+    ?? results.find((q) => q.isError && q.data === undefined)?.error
 }
 
 /**
