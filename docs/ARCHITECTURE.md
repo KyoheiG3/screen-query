@@ -52,6 +52,9 @@ const queriesRef = useRef<Map<string, ScreenQuery>>(new Map())
 // Manages QueryObserver instances
 const observersRef = useRef<Map<string, QueryObserver>>(new Map())
 
+// Query keys already reported as detached, to keep the warning to one per key
+const warnedRef = useRef<Set<string>>(new Set())
+
 // Manages asynchronous Promise handling
 const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
 ```
@@ -95,6 +98,35 @@ const refetchQueries = async () => {
 
 #### 3. clearCache
 Clears cache for error state queries or all queries.
+
+### Observer Lifecycle
+
+Provider-owned observers live in `observersRef` until `clearCache` or provider
+unmount destroys them, but they are only **subscribed** while a suspend promise is
+waiting on them (`createObserverPromise`). That asymmetry is worth understanding,
+because an unsubscribed observer neither keeps its query in the cache nor receives
+updates about it:
+
+- While a screen loads, the consumer's own observer (`useQuery` / `useQueryKey`) is
+  not subscribed either - a suspended render never reaches its effects - so between
+  the fetch settling and the retried render committing, the query can have **zero
+  observers**. A `gcTime: 0` entry is garbage collected in that window.
+- The consumer then rebuilds the query as pending on its next render, while the
+  provider's observer still holds the collected one and reports it as successful.
+
+Left alone that combination makes `getQueryResult` return `undefined` for a query it
+considers settled - a crash at the first property access. So a reused observer is
+re-pointed at the query currently in the cache (`syncObserverQuery`), which turns the
+situation into a normal suspend-and-refetch. The same applies when the entry is
+replaced deliberately by `removeQueries` / `queryClient.clear()`.
+
+Recovering is not free: the query is fetched again, and a screen that had already
+painted falls back to its loading state before painting a second time. Since that is
+a real cost hiding behind a working screen, the recovery is reported once per query
+key with `console.warn` outside production (`warnDetachedQuery`). The usual fix on
+the consumer side is a `gcTime` larger than the gap between the fetch settling and
+the render committing - a second is plenty, and the entry is still discarded when the
+screen goes away.
 
 ### Notification Control Mechanism
 

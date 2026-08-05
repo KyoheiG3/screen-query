@@ -103,6 +103,86 @@ function createObserver(queryClient: QueryClient, query: ScreenQuery) {
 }
 
 /**
+ * Re-point an Observer at the Query that is currently in the cache.
+ *
+ * A cache entry can be dropped behind the Observer's back (`removeQueries`,
+ * `queryClient.clear()`, or garbage collection), and the consumer side rebuilds it
+ * on its next render. The Observer would then keep reporting the state of the
+ * detached Query - typically `isSuccess` - while the rebuilt Query is pending, so
+ * re-applying the options keeps the snapshot used for the Suspense decision
+ * truthful.
+ * @param queryClient - TanStack Query's QueryClient
+ * @param observer - Observer to re-point
+ * @param query - Query being observed
+ * @returns true if the Observer was pointing at a detached Query
+ */
+function syncObserverQuery(
+  queryClient: QueryClient,
+  observer: QueryObserver,
+  query: ScreenQuery,
+) {
+  const cachedQuery = queryClient.getQueryCache().find({
+    queryKey: query.queryKey,
+    exact: true,
+  })
+
+  if (!cachedQuery || cachedQuery === observer.getCurrentQuery()) {
+    return false
+  }
+
+  observer.setOptions({
+    ...cachedQuery.options,
+    queryKey: query.queryKey,
+  })
+
+  return true
+}
+
+// Bundlers replace `process.env.NODE_ENV` with a literal; declared locally so the
+// package does not need Node types for one guard
+declare const process: { env?: { NODE_ENV?: string } | undefined } | undefined
+
+/**
+ * Check whether the bundle is a production build, keeping warnings out of it.
+ * @returns true if NODE_ENV is production
+ */
+function isProduction() {
+  return (
+    typeof process !== 'undefined' && process?.env?.NODE_ENV === 'production'
+  )
+}
+
+/**
+ * Warn once per query key that its cache entry was replaced mid-resolution.
+ *
+ * Recovering from this costs a refetch and re-suspends a screen that had already
+ * rendered, so it is worth surfacing rather than silently absorbing: without
+ * `syncObserverQuery` the same situation reads as a settled query with `undefined`
+ * data, which is a crash at the first property access.
+ * @param warned - Keys already warned about, to keep the message to one per key
+ * @param keyString - Serialized query key
+ * @param queryKey - Query key to include in the message
+ */
+function warnDetachedQuery(
+  warned: Set<string>,
+  keyString: string,
+  queryKey: QueryKey,
+) {
+  if (isProduction() || warned.has(keyString)) {
+    return
+  }
+  warned.add(keyString)
+
+  // biome-ignore lint/suspicious/noConsole: reporting a recovery a caller should know about
+  console.warn(
+    `[screen-query] The cache entry for ${keyString} was replaced while the screen was resolving it, so its data is being fetched again.\n` +
+      "Expected right after removeQueries()/clear(). Otherwise the query was garbage collected mid-resolution: the Provider releases its observer as soon as the query settles, and the consumer's own observer only subscribes once the retried render commits, so a `gcTime: 0` entry can be collected in between.\n" +
+      'Raise gcTime above that gap (a second is plenty) if this refetch is not intended.',
+    queryKey,
+  )
+}
+
+/**
  * Check loading state of multiple Observers
  * @param observers - Array of Observers to check
  * @returns true if any is pending, false if all are settled
@@ -201,6 +281,7 @@ export function ScreenQueryProvider({
   const queryClient = useQueryClient()
   const queriesRef = useRef<Map<string, ScreenQuery>>(new Map())
   const observersRef = useRef<Map<string, QueryObserver>>(new Map())
+  const warnedRef = useRef<Set<string>>(new Set())
   const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
 
   /**
@@ -219,7 +300,12 @@ export function ScreenQueryProvider({
         // Check for existing Observer, create new if none
         const currentObserver = observersRef.current.get(keyString)
         const observer = currentObserver ?? createObserver(queryClient, query)
-        if (!currentObserver) {
+        if (currentObserver) {
+          // The cache entry may have been replaced since the last render
+          if (syncObserverQuery(queryClient, currentObserver, query)) {
+            warnDetachedQuery(warnedRef.current, keyString, query.queryKey)
+          }
+        } else {
           observersRef.current.set(keyString, observer)
         }
 
