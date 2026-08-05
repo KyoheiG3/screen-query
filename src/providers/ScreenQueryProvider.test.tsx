@@ -47,7 +47,7 @@ describe('ScreenQueryProvider', () => {
   })
 
   // getQueryResult tests moved to ScreenQueryProvider.getQueryResult.test.tsx
-  // refetchQueries tests moved to ScreenQueryProvider.refetchAllQueries.test.tsx
+  // refetchQueries tests moved to ScreenQueryProvider.refetchQueries.test.tsx
   // clearCache tests moved to ScreenQueryProvider.clearCache.test.tsx
   // Promise Management tests moved to ScreenQueryProvider.promises.test.tsx
   // Observer Management tests moved to ScreenQueryProvider.observers.test.tsx

@@ -8,7 +8,7 @@ import {
   useTestScreenQueryContext,
 } from '~/test-utils/screen-query'
 
-describe('ScreenQueryProvider.refetchAllQueries', () => {
+describe('ScreenQueryProvider.refetchQueries', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
