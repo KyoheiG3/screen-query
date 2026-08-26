@@ -38,6 +38,7 @@ const queryKey = ['suspense-user']
 describe('ScreenQueryProvider through a Suspense boundary', () => {
   let queryClient: QueryClient
   let fetchCount: number
+  let renderCount: number
   let resolvedUndefined: boolean
 
   // createQueryClient defaults every query to gcTime: 0, which is what makes a
@@ -51,6 +52,7 @@ describe('ScreenQueryProvider through a Suspense boundary', () => {
   }
 
   function Consumer({ gcTime }: { gcTime?: number }) {
+    renderCount++
     // Spread conditionally: an explicit undefined would override the client
     // default (gcTime: 0) instead of falling back to it
     const query = useQuery({
@@ -89,6 +91,7 @@ describe('ScreenQueryProvider through a Suspense boundary', () => {
     // Given: Initialize new QueryClient
     queryClient = createQueryClient()
     fetchCount = 0
+    renderCount = 0
     resolvedUndefined = false
   })
 
@@ -134,6 +137,43 @@ describe('ScreenQueryProvider through a Suspense boundary', () => {
     })
     expect(fetchCount).toBeGreaterThan(fetchCountBeforeRemoval)
     expect(resolvedUndefined).toBe(false)
+  })
+
+  it('should suspend instead of resolving undefined after the query is reset', async () => {
+    // Given: A resolved consumer whose cache entry outlives its observers, so the
+    // only thing that changes below is the state of the query, not its identity
+    render(tree(60_000))
+    await waitFor(() => {
+      expect(screen.getByText('data: Test User')).toBeTruthy()
+    })
+    const fetchCountBeforeReset = fetchCount
+    const renderCountBeforeReset = renderCount
+
+    // When: The query is rewound in place - reset() keeps the same Query object,
+    // so an observer holding it sees no change of identity to react to
+    await act(async () => {
+      void queryClient.resetQueries()
+      // React Query flushes its notifications on a timer, so the rewound state
+      // only reaches the consumer after a tick - the refetch behind it is still
+      // in flight by then
+      await delay(0)
+    })
+
+    // Then: The rewound state is read as pending, so the screen falls back while
+    // the query is fetched again instead of being handed a settled-looking
+    // undefined
+    expect(screen.getByText('loading')).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.queryByText('loading')).toBeNull()
+    })
+    expect(screen.getByText('data: Test User')).toBeTruthy()
+    expect(fetchCount).toBeGreaterThan(fetchCountBeforeReset)
+    expect(resolvedUndefined).toBe(false)
+
+    // And: it fell back once and painted once, rather than retrying as fast as
+    // the suspend promise can resolve until the fetch happens to land - which is
+    // what a promise that settles against a state the decision rejected does
+    expect(renderCount - renderCountBeforeReset).toBeLessThanOrEqual(10)
   })
 
   it('should warn that a gcTime: 0 query was collected mid-resolution', async () => {
