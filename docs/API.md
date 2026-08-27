@@ -127,7 +127,7 @@ const [repos, user] = getQueryResult(
   - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
 
 **Behavior**:
-- Query is loading → Throws Promise (caught by Suspense)
+- Any query registered on the screen is loading → Throws Promise (caught by Suspense)
 - Observer created with `suspendOnCreate: true` → Throws Promise (caught by Suspense)
 - Query has error → Throws Error (caught by ErrorBoundary)
 - Query succeeds → Returns array of data

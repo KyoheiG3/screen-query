@@ -1,5 +1,5 @@
 import { type QueryClient, useQuery } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, render, renderHook, waitFor } from '@testing-library/react'
 import {
   createMockData,
   createMockUser,
@@ -570,6 +570,70 @@ describe('ScreenQueryProvider.getQueryResult', () => {
       expect(result.current.threwPromise).toBe(true)
       expect(result.current.dataReceived).toBe(0)
       expect(result.current.statuses).toEqual(['success', 'success', 'pending'])
+    })
+
+    it('should throw promise while a query registered by another component is loading', () => {
+      // Given: A screen split across two components, one of them holding a query
+      // that never settles, and a second one whose own query is already cached
+      const settledData = createMockUser(1, 'Settled User')
+      const settledKey = ['screen-settled']
+      queryClient.setQueryData(settledKey, settledData)
+
+      const settledQueryOptions = {
+        queryKey: settledKey,
+        queryFn: () => Promise.resolve(settledData),
+        staleTime: Infinity,
+      }
+      const loadingQueryOptions = createQueryOptions(['screen-loading'], null, {
+        isPending: true,
+      })
+
+      const Sibling = () => {
+        const query = useQuery(loadingQueryOptions)
+        const context = useTestScreenQueryContext()
+
+        try {
+          context.getQueryResult([{ ...query, ...loadingQueryOptions }])
+        } catch {
+          // Swallowed so the sibling below still renders - registering the query
+          // with the provider is all this component is here for
+        }
+
+        return null
+      }
+
+      let status = 'not-rendered'
+      const Consumer = () => {
+        const query = useQuery(settledQueryOptions)
+        const context = useTestScreenQueryContext()
+
+        try {
+          context.getQueryResult([{ ...query, ...settledQueryOptions }])
+          status = `data-returned:${query.status}`
+        } catch (error) {
+          if (!(error instanceof Promise)) {
+            throw error
+          }
+          void error.then(() => {})
+          status = `promise-thrown:${query.status}`
+        }
+
+        return null
+      }
+
+      // When: The component whose query is settled renders
+      const wrapper = createWrapper(queryClient)
+      render(
+        <>
+          <Sibling />
+          <Consumer />
+        </>,
+        { wrapper },
+      )
+
+      // Then: It suspends on the query it never passed in, so the screen paints
+      // in one piece rather than in parts
+      expect(status).toBe('promise-thrown:success')
     })
   })
 

@@ -99,26 +99,60 @@ const refetchQueries = async () => {
 #### 3. clearCache
 Clears cache for error state queries or all queries.
 
+### Where the Suspend Decision Comes From
+
+`getQueryResult` suspends when any **registered** query is pending, and each
+registered query reports its state from one of two sources (`readQueryStates`):
+
+| Query | State read from |
+| --- | --- |
+| Passed in this call | The caller's own result |
+| Registered by another call | Its provider-owned observer's snapshot |
+
+A result the caller passed is recomputed from the live cache entry on every render,
+and it is also what `getQueryResult` hands back. Deciding from it is what keeps the
+decision and the returned data in step: a query cannot be treated as settled while
+its `data` is still `undefined`, so the declared return type - data, never
+`undefined` - holds. For the same reason the error thrown to the ErrorBoundary comes
+from those results.
+
+Observer snapshots cover the queries nobody passed this render, which is what keeps
+components that resolve at different times from painting in parts. Reading their live
+state instead would gate a screen on queries no live screen holds: a query the
+previous screen left behind would have to be fetched again before the current screen
+could paint.
+
+The suspend promise then waits on exactly the queries that decision found pending
+(`createObserverPromise`). Waiting on a query the decision considered settled would
+resolve the promise at once and suspend again on the retried render, spinning
+through renders until the query happens to settle on its own.
+
 ### Observer Lifecycle
 
 Provider-owned observers live in `observersRef` until `clearCache` or provider
 unmount destroys them, but they are only **subscribed** while a suspend promise is
-waiting on them (`createObserverPromise`). That asymmetry is worth understanding,
-because an unsubscribed observer neither keeps its query in the cache nor receives
-updates about it:
+waiting on them. That asymmetry is worth understanding, because an unsubscribed
+observer neither keeps its query in the cache nor hears about it:
 
+- An unsubscribed observer is not notified when the query it holds is rewound in
+  place. `resetQueries()` keeps the same `Query` object and only puts its state back
+  to pending, so nothing about the entry's identity changes and the snapshot stays at
+  whatever the query looked like when it settled. This is why a snapshot cannot
+  decide for a query the caller passed a result for.
 - While a screen loads, the consumer's own observer (`useQuery` / `useQueryKey`) is
   not subscribed either - a suspended render never reaches its effects - so between
   the fetch settling and the retried render committing, the query can have **zero
-  observers**. A `gcTime: 0` entry is garbage collected in that window.
-- The consumer then rebuilds the query as pending on its next render, while the
-  provider's observer still holds the collected one and reports it as successful.
+  observers**. A `gcTime: 0` entry is garbage collected in that window, and the
+  consumer rebuilds it as pending on its next render while the provider's observer
+  still holds the collected one.
 
-Left alone that combination makes `getQueryResult` return `undefined` for a query it
-considers settled - a crash at the first property access. So a reused observer is
-re-pointed at the query currently in the cache (`syncObserverQuery`), which turns the
-situation into a normal suspend-and-refetch. The same applies when the entry is
-replaced deliberately by `removeQueries` / `queryClient.clear()`.
+An observer holding a detached query is not just stale, it is inert: the suspend
+promise waiting on it would subscribe to - and fetch - the query the cache has
+thrown away, so nothing would fetch the entry the screen is reading and the screen
+would never leave its fallback. So a reused observer is re-pointed at the query
+currently in the cache (`syncObserverQuery`), which turns the situation into a normal
+suspend-and-refetch. The same applies when the entry is replaced deliberately by
+`removeQueries` / `queryClient.clear()`.
 
 Recovering is not free: the query is fetched again, and a screen that had already
 painted falls back to its loading state before painting a second time. Since that is

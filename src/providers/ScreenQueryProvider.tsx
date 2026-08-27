@@ -107,10 +107,10 @@ function createObserver(queryClient: QueryClient, query: ScreenQuery) {
  *
  * A cache entry can be dropped behind the Observer's back (`removeQueries`,
  * `queryClient.clear()`, or garbage collection), and the consumer side rebuilds it
- * on its next render. The Observer would then keep reporting the state of the
- * detached Query - typically `isSuccess` - while the rebuilt Query is pending, so
- * re-applying the options keeps the snapshot used for the Suspense decision
- * truthful.
+ * on its next render. The Observer would then still hold the detached Query, so
+ * the suspend Promise waiting on it would subscribe to - and fetch - a Query the
+ * cache has thrown away: nothing would ever fetch the entry the screen is actually
+ * reading, and it would never leave its fallback.
  * @param queryClient - TanStack Query's QueryClient
  * @param observer - Observer to re-point
  * @param query - Query being observed
@@ -156,9 +156,7 @@ function isProduction() {
  * Warn once per query key that its cache entry was replaced mid-resolution.
  *
  * Recovering from this costs a refetch and re-suspends a screen that had already
- * rendered, so it is worth surfacing rather than silently absorbing: without
- * `syncObserverQuery` the same situation reads as a settled query with `undefined`
- * data, which is a crash at the first property access.
+ * rendered, so it is worth surfacing rather than silently absorbing.
  * @param warned - Keys already warned about, to keep the message to one per key
  * @param keyString - Serialized query key
  * @param queryKey - Query key to include in the message
@@ -183,12 +181,44 @@ function warnDetachedQuery(
 }
 
 /**
- * Check loading state of multiple Observers
- * @param observers - Array of Observers to check
- * @returns true if any is pending, false if all are settled
+ * State of one registered query, paired with the Observer a suspend Promise can
+ * wait on to learn that it settled.
  */
-function checkLoadingState(observers: QueryObserver[]) {
-  return observers.some((observer) => observer.getCurrentResult().isPending)
+type RegisteredQueryState = {
+  observer: QueryObserver
+  isPending: boolean
+}
+
+/**
+ * Read the state of every registered query.
+ *
+ * A result the caller passed decides for its own query. It is recomputed from the
+ * live cache entry on every render and it is what `getQueryResult` hands back, so
+ * deciding from it keeps the suspend decision and the returned data in step - a
+ * query can never be treated as settled while its data is still `undefined`.
+ *
+ * A provider-owned observer only reports what it saw when the query last settled:
+ * it is unsubscribed as soon as its suspend Promise resolves, and a query rewound
+ * in place - `resetQueries()` keeps the same Query object and only puts its state
+ * back to pending - notifies nobody who is not subscribed. So its snapshot decides
+ * only for the queries nobody passed this render, which is what keeps the whole
+ * screen suspended together.
+ * @param observers - Registered Observers, keyed by query key string
+ * @param results - Query results the caller passed
+ * @returns State of every registered query
+ */
+function readQueryStates(
+  observers: Map<string, QueryObserver>,
+  results: readonly ScreenQueryResult[],
+): RegisteredQueryState[] {
+  const passed = new Map(
+    results.map((result) => [getQueryKeyString(result), result]),
+  )
+
+  return [...observers].map(([keyString, observer]) => ({
+    observer,
+    isPending: (passed.get(keyString) ?? observer.getCurrentResult()).isPending,
+  }))
 }
 
 /**
@@ -211,50 +241,44 @@ function generateQuerySetKey(queries: readonly ScreenQuery[]) {
 }
 
 /**
- * Create Promise that waits for Observer completion
- * Resolves when query succeeds or errors
- * @param observer - Observer to monitor
+ * Create Promise that waits for a registered query to settle.
+ *
+ * Whether it has already settled is taken from the state that made the suspend
+ * decision, not from the Observer's own snapshot: a Promise that resolves against
+ * a snapshot the decision rejected would resolve at once and suspend again on the
+ * retried render, spinning until the query settles on its own.
+ * @param state - State of the query to wait for
  * @returns Promise that waits for completion
  */
-function createObserverPromise(observer: QueryObserver) {
+function createObserverPromise({ observer, isPending }: RegisteredQueryState) {
   return new Promise<void>((resolve) => {
-    const result = observer.getCurrentResult()
-    if (result.isSuccess || result.isError) {
+    if (!isPending) {
       resolve()
-    } else {
-      const unsubscribe = observer.subscribe((result) => {
-        if (result.isSuccess || result.isError) {
-          unsubscribe()
-          resolve()
-        }
-      })
+      return
     }
+
+    const unsubscribe = observer.subscribe((result) => {
+      if (result.isSuccess || result.isError) {
+        unsubscribe()
+        resolve()
+      }
+    })
   })
 }
 
 /**
- * Get query error from Observers or query results.
- * Checks both sources to find any existing error.
+ * Get query error from the results the caller passed.
  *
  * Only errors without existing data are returned, mirroring the default
  * `throwOnError` of useSuspenseQuery/useSuspenseInfiniteQuery
  * (`query.state.data === undefined`). This keeps partial data visible when a
  * refetch or fetchNextPage fails, instead of tearing down the screen via the
  * ErrorBoundary.
- * @param observers - Array of QueryObservers to check
  * @param results - Array of QueryObserverBaseResult to check
  * @returns The first error found, or undefined if no errors
  */
-function getQueryError(
-  observers: readonly QueryObserver[],
-  results: readonly QueryObserverBaseResult[],
-) {
-  return (
-    observers
-      .map((observer) => observer.getCurrentResult())
-      .find((result) => result.isError && result.data === undefined)?.error ??
-    results.find((q) => q.isError && q.data === undefined)?.error
-  )
+function getQueryError(results: readonly QueryObserverBaseResult[]) {
+  return results.find((q) => q.isError && q.data === undefined)?.error
 }
 
 /**
@@ -287,43 +311,52 @@ export function ScreenQueryProvider({
   /**
    * Register queries and Observers or get existing ones
    * @param queries - Array of queries to register
-   * @returns Registration result for each query (creation flag and Observer)
+   * @returns true if an Observer was created for any of the queries
    */
   const registerQueriesAndObservers = useCallback(
     (queries: readonly ScreenQuery[]) => {
-      return queries.map((query) => {
-        const keyString = getQueryKeyString(query)
+      // Mapped before reducing so every query is registered, not just the ones
+      // before the first newly created Observer
+      return queries
+        .map((query) => {
+          const keyString = getQueryKeyString(query)
 
-        // Save query to Map
-        queriesRef.current.set(keyString, query)
+          // Save query to Map
+          queriesRef.current.set(keyString, query)
 
-        // Check for existing Observer, create new if none
-        const currentObserver = observersRef.current.get(keyString)
-        const observer = currentObserver ?? createObserver(queryClient, query)
-        if (currentObserver) {
-          // The cache entry may have been replaced since the last render
-          if (syncObserverQuery(queryClient, currentObserver, query)) {
-            warnDetachedQuery(warnedRef.current, keyString, query.queryKey)
+          // Check for existing Observer, create new if none
+          const currentObserver = observersRef.current.get(keyString)
+          if (currentObserver) {
+            // The cache entry may have been replaced since the last render
+            if (syncObserverQuery(queryClient, currentObserver, query)) {
+              warnDetachedQuery(warnedRef.current, keyString, query.queryKey)
+            }
+          } else {
+            observersRef.current.set(
+              keyString,
+              createObserver(queryClient, query),
+            )
           }
-        } else {
-          observersRef.current.set(keyString, observer)
-        }
 
-        return { created: !currentObserver, observer }
-      })
+          return !currentObserver
+        })
+        .some(Boolean)
     },
     [queryClient],
   )
 
   /**
-   * Create or get Promise that waits for all Observers in the specified query set to complete
+   * Create or get Promise that waits for every registered query to settle
    * Reuses existing Promise for the same query set
-   * @param observers - Array of Observers to monitor
+   * @param states - State of every registered query
    * @param queries - Corresponding query array (for key generation)
-   * @returns Promise that waits for all Observers to complete
+   * @returns Promise that waits for all pending queries to settle
    */
   const createCombinedPromise = useCallback(
-    (observers: readonly QueryObserver[], queries: readonly ScreenQuery[]) => {
+    (
+      states: readonly RegisteredQueryState[],
+      queries: readonly ScreenQuery[],
+    ) => {
       const querySetKey = generateQuerySetKey(queries)
 
       // Check for existing Promise for the same query set
@@ -331,7 +364,7 @@ export function ScreenQueryProvider({
       // Create new Promise if none exists
       const combinedPromise =
         existingPromise ??
-        Promise.all(observers.map(createObserverPromise)).then(() => {
+        Promise.all(states.map(createObserverPromise)).then(() => {
           queryPromiseRef.current.delete(querySetKey)
         })
       if (!existingPromise) {
@@ -359,35 +392,34 @@ export function ScreenQueryProvider({
     ) => {
       const { suspendOnCreate = false } = options ?? {}
 
-      // Register queries and get Observers
-      const registerResult = registerQueriesAndObservers(results)
-      const observerCreated = registerResult.some((result) => result.created)
+      // Register queries and Observers
+      const observerCreated = registerQueriesAndObservers(results)
 
-      // Get all Observers
-      const allObservers = [...observersRef.current.values()]
+      // Read the state of every registered query, not only the ones passed in
+      const queryStates = readQueryStates(observersRef.current, results)
 
       // Check loading state and throw Promise for React Suspense
       if (
         (suspendOnCreate && observerCreated) ||
-        checkLoadingState(allObservers)
+        queryStates.some((state) => state.isPending)
       ) {
         // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
         // When React catches this Promise, it will show the fallback UI and re-render when resolved.
         // This ensures all queries complete before rendering, preventing partial UI updates.
-        throw createCombinedPromise(allObservers, results)
+        throw createCombinedPromise(queryStates, results)
       }
 
-      // Get current Observers
-      const currentObservers = registerResult.map((result) => result.observer)
       // Check for errors and throw for React ErrorBoundary
-      const error = getQueryError(currentObservers, results)
+      const error = getQueryError(results)
       if (error) {
         // React ErrorBoundary pattern: Throwing an Error triggers the nearest ErrorBoundary.
         // This provides consistent error handling across all queries in the component.
         throw error
       }
 
-      // Return data
+      // Every result is settled here, and an error was only tolerated while it had
+      // data to show, so no element of this array is undefined: the declared
+      // return type holds
       return results.map((q) => q.data)
     },
     [registerQueriesAndObservers, createCombinedPromise],
