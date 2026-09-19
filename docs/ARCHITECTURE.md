@@ -126,8 +126,14 @@ the provider's observer instead, on every retried render, and a query that keeps
 failing would never reach the ErrorBoundary. The cache entry is what tells the two
 apart: fetching a query without data puts it back to pending, as do `clearCache` and
 `resetQueries()`, so an `error` status means nothing has asked for it again. Such a
-query counts as settled, and the error it settled with is thrown. Retrying it is
-`clearCache`'s job (see "Error Recovery" in the README).
+query counts as settled, and the error it settled with is thrown.
+
+Retrying it takes an explicit request: `clearCache`, or a reset `QueryErrorResetBoundary`
+passed as `errorResetBoundary`. While it is reset, failed queries are fetched instead of
+thrown, as TanStack Query's suspense hooks do. The reset holds until a query read under
+it commits, and a retried render never commits, so a retry that fails again clears it
+from the suspend promise (`createObserverPromise`) - otherwise every retried render
+would fetch the query once more.
 
 Observer snapshots cover the queries nobody passed this render, which is what keeps
 components that resolve at different times from painting in parts. Reading their live

@@ -125,11 +125,12 @@ const [repos, user] = getQueryResult(
 - `results` - Array of query results from `useQuery` (must include `queryKey`)
 - `options` - Optional configuration
   - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
+  - `errorResetBoundary` - The `QueryErrorResetBoundary` the caller renders under (`useQueryErrorResetBoundary()`). While it is reset, a failed query is fetched again instead of thrown; without it, only `clearCache` retries a failed query
 
 **Behavior**:
 - Any query registered on the screen is loading → Throws Promise (caught by Suspense)
 - Observer created with `suspendOnCreate: true` → Throws Promise (caught by Suspense)
-- Query has error → Throws Error (caught by ErrorBoundary)
+- Query has error → Throws Error (caught by ErrorBoundary), until `clearCache` or a reset `errorResetBoundary` asks for it again
 - Query succeeds → Returns array of data
 
 **Type Signature**:
@@ -137,7 +138,10 @@ const [repos, user] = getQueryResult(
 type GetQueryResult = {
   <T extends readonly ScreenQueryResult[]>(
     results: [...T],
-    options?: { suspendOnCreate?: boolean },
+    options?: {
+      suspendOnCreate?: boolean
+      errorResetBoundary?: ErrorResetBoundary
+    },
   ): {
     [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never
   }

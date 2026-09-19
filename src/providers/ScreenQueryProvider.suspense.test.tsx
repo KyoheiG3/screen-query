@@ -1,7 +1,9 @@
 import {
   type QueryClient,
   QueryClientProvider,
+  QueryErrorResetBoundary,
   useQuery,
+  useQueryErrorResetBoundary,
 } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import React, { Suspense } from 'react'
@@ -238,6 +240,7 @@ describe('ScreenQueryProvider through a Suspense boundary when the query fails',
   let fetchCount: number
   let failing: boolean
   let context: ReturnType<typeof useTestScreenQueryContext> | undefined
+  let resetErrorBoundary: (() => void) | undefined
 
   const queryKey = ['suspense-failing-user']
 
@@ -252,9 +255,11 @@ describe('ScreenQueryProvider through a Suspense boundary when the query fails',
     // gcTime keeps the failed entry in the cache between the fetch settling and
     // the retried render, so what is measured is the retry, not garbage collection
     const query = useQuery({ queryKey, queryFn, gcTime: 60_000 })
-    const [data] = useTestScreenQueryContext().getQueryResult([
-      { ...query, queryKey },
-    ])
+    const errorResetBoundary = useQueryErrorResetBoundary()
+    const [data] = useTestScreenQueryContext().getQueryResult(
+      [{ ...query, queryKey }],
+      { errorResetBoundary },
+    )
     return `data: ${data.name}`
   }
 
@@ -268,11 +273,18 @@ describe('ScreenQueryProvider through a Suspense boundary when the query fails',
       <QueryClientProvider client={queryClient}>
         <ScreenQueryProvider>
           <ContextProbe />
-          <TestBoundary key={attempt}>
-            <Suspense fallback="loading">
-              <Consumer />
-            </Suspense>
-          </TestBoundary>
+          <QueryErrorResetBoundary>
+            {({ reset }) => {
+              resetErrorBoundary = reset
+              return (
+                <TestBoundary key={attempt}>
+                  <Suspense fallback="loading">
+                    <Consumer />
+                  </Suspense>
+                </TestBoundary>
+              )
+            }}
+          </QueryErrorResetBoundary>
         </ScreenQueryProvider>
       </QueryClientProvider>
     )
@@ -284,6 +296,7 @@ describe('ScreenQueryProvider through a Suspense boundary when the query fails',
     fetchCount = 0
     failing = true
     context = undefined
+    resetErrorBoundary = undefined
     suppressConsoleError()
   })
 
@@ -332,6 +345,47 @@ describe('ScreenQueryProvider through a Suspense boundary when the query fails',
     expect(fetchCount).toBeGreaterThan(1)
   })
 
+  it('should fetch the failed query again once the QueryErrorResetBoundary is reset', async () => {
+    // Given: A consumer showing its failure through the ErrorBoundary
+    const { rerender } = render(tree())
+    await waitFor(() => {
+      expect(screen.getByText('error: Fetch failed')).toBeTruthy()
+    })
+    failing = false
+
+    // When: The ErrorBoundary is reset together with its QueryErrorResetBoundary,
+    // as `onReset={reset}` does - without clearing the failed query
+    resetErrorBoundary?.()
+    rerender(tree(1))
+
+    // Then: The query is fetched again and the screen recovers
+    expect(screen.getByText('loading')).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByText('data: Test User')).toBeTruthy()
+    })
+    expect(fetchCount).toBeGreaterThan(1)
+  })
+
+  it('should throw the failure again when the retry after a reset fails too', async () => {
+    // Given: A consumer showing its failure through the ErrorBoundary
+    const { rerender } = render(tree())
+    await waitFor(() => {
+      expect(screen.getByText('error: Fetch failed')).toBeTruthy()
+    })
+
+    // When: The ErrorBoundary is reset to retry, and the query keeps failing
+    resetErrorBoundary?.()
+    rerender(tree(1))
+
+    // Then: The retry fails once and the failure reaches the ErrorBoundary again,
+    // rather than the reset letting every retried render fetch it
+    await waitFor(() => {
+      expect(screen.getByText('error: Fetch failed')).toBeTruthy()
+    })
+    await delay(50)
+    expect(fetchCount).toBe(2)
+  })
+
   it('should keep throwing the failure when the ErrorBoundary is reset alone', async () => {
     // Given: A consumer showing its failure through the ErrorBoundary
     const { rerender } = render(tree())
@@ -340,11 +394,12 @@ describe('ScreenQueryProvider through a Suspense boundary when the query fails',
     })
     failing = false
 
-    // When: The ErrorBoundary is reset without clearing the failed query
+    // When: The ErrorBoundary is reset without its QueryErrorResetBoundary and
+    // without clearing the failed query
     rerender(tree(1))
 
-    // Then: The settled failure is thrown again without a fetch - retrying is
-    // clearCache's job, as the error recovery pattern documents
+    // Then: The settled failure is thrown again without a fetch - nothing asked
+    // for the query again
     await waitFor(() => {
       expect(screen.getByText('error: Fetch failed')).toBeTruthy()
     })

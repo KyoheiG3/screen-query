@@ -143,6 +143,7 @@ Synchronously get results from multiple queries.
   - `results` - Array of query results from `useQuery` (must include `queryKey`)
   - `options` - Optional configuration
     - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
+    - `errorResetBoundary` - The `QueryErrorResetBoundary` the caller renders under (`useQueryErrorResetBoundary()`). While it is reset, a failed query is fetched again instead of thrown - see [Error Recovery](#error-recovery)
 - **Returns**: Array of query data in the same order as input
 - **Throws**:
   - `Promise` during loading state (handled by Suspense)
@@ -205,6 +206,51 @@ function RefreshableScreen() {
 ```
 
 ### Error Recovery
+
+A query that failed without data is thrown to the ErrorBoundary and stays failed until
+something asks for it again. Pass the `QueryErrorResetBoundary` the component renders
+under to `getQueryResult`, and resetting the ErrorBoundary together with it is enough -
+the same pattern TanStack Query's suspense hooks use:
+
+```tsx
+import {
+  QueryErrorResetBoundary,
+  useQueryErrorResetBoundary,
+} from '@tanstack/react-query'
+
+function UserProfile() {
+  const { getQueryResult } = useScreenQueryContext()
+  const errorResetBoundary = useQueryErrorResetBoundary()
+  const user = useQueryKey({ queryKey: ['user'], queryFn: fetchUser })
+  const [userData] = getQueryResult([user], { errorResetBoundary })
+  // ...
+}
+
+function ErrorBoundaryWithRetry({ children }) {
+  return (
+    <QueryErrorResetBoundary>
+      {({ reset }) => (
+        <ErrorBoundary
+          onReset={reset}
+          fallbackRender={({ resetErrorBoundary }) => (
+            <div>
+              <h2>Something went wrong</h2>
+              <button onClick={() => resetErrorBoundary()}>Try again</button>
+            </div>
+          )}
+        >
+          {children}
+        </ErrorBoundary>
+      )}
+    </QueryErrorResetBoundary>
+  )
+}
+```
+
+If the retried fetch fails as well, the failure is thrown to the ErrorBoundary again
+rather than fetched once more.
+
+Without `errorResetBoundary`, clear the failed queries before resetting instead:
 
 ```tsx
 function ErrorBoundaryWithRetry({ children }) {

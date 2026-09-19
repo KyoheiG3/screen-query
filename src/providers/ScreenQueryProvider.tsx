@@ -6,6 +6,7 @@ import {
   type QueryObserverBaseResult,
   type QueryState,
   useQueryClient,
+  type useQueryErrorResetBoundary,
 } from '@tanstack/react-query'
 import type React from 'react'
 import { createContext, useCallback, useEffect, useRef } from 'react'
@@ -34,12 +35,33 @@ type ScreenQuery = {
 export type ClearCacheStatus = 'error' | 'all'
 
 /**
+ * The value of TanStack Query's QueryErrorResetBoundary, as returned by
+ * `useQueryErrorResetBoundary()`: an ErrorBoundary calls `reset()` to retry, and
+ * `isReset()` holds until a query read under it commits.
+ */
+export type ErrorResetBoundary = ReturnType<typeof useQueryErrorResetBoundary>
+
+/**
+ * Options for `getQueryResult`.
+ */
+type GetQueryResultOptions = {
+  /** If true, throws Promise when observer is first created (default: false) */
+  suspendOnCreate?: boolean
+  /**
+   * The QueryErrorResetBoundary the caller renders under, from
+   * `useQueryErrorResetBoundary()`. While it is reset, a failed query is fetched
+   * again instead of thrown; without it, only `clearCache` retries a failed query.
+   */
+  errorResetBoundary?: ErrorResetBoundary
+}
+
+/**
  * Function type for getting query results synchronously.
  * Throws Promise during loading, throws Error on error, returns data on success.
  */
 type GetQueryResult = <T extends readonly ScreenQueryResult[]>(
   results: [...T],
-  options?: { suspendOnCreate?: boolean },
+  options?: GetQueryResultOptions,
 ) => {
   [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never
 }
@@ -55,6 +77,7 @@ export type ScreenQueryContextValue = {
    * @param results - Array of query results to fetch
    * @param options - Optional configuration
    * @param options.suspendOnCreate - If true, throws Promise when observer is first created (default: false)
+   * @param options.errorResetBoundary - The QueryErrorResetBoundary to retry failed queries on reset
    * @throws {Promise} During loading state (handled by Suspense)
    * @throws {Error} When query has error (handled by ErrorBoundary)
    * @returns Array of query data in the same order as input
@@ -203,7 +226,8 @@ type RegisteredQueryState = {
  * keeps failing would be fetched again on every retried render and never reach the
  * ErrorBoundary. The cache entry tells the two apart - a fetch puts a query without
  * data back to pending, and so do `clearCache` and `resetQueries()`, so an `error`
- * status means nothing has asked for it again.
+ * status means nothing has asked for it again. A reset QueryErrorResetBoundary is
+ * the other way to ask, and `getQueryResult` skips this read while it holds.
  * @param queryClient - TanStack Query's QueryClient
  * @param results - Query results the caller passed
  * @returns Settled cache state of each failed query, keyed by query key string
@@ -293,7 +317,10 @@ function generateQuerySetKey(queries: readonly ScreenQuery[]) {
  * @param state - State of the query to wait for
  * @returns Promise that waits for completion
  */
-function createObserverPromise({ observer, isPending }: RegisteredQueryState) {
+function createObserverPromise(
+  { observer, isPending }: RegisteredQueryState,
+  errorResetBoundary?: ErrorResetBoundary,
+) {
   return new Promise<void>((resolve) => {
     if (!isPending) {
       resolve()
@@ -302,6 +329,10 @@ function createObserverPromise({ observer, isPending }: RegisteredQueryState) {
 
     const unsubscribe = observer.subscribe((result) => {
       if (result.isSuccess || result.isError) {
+        // A reset holds until a query read under it commits, and a retried render
+        // never commits: without clearing it here, a retry that fails again would be
+        // fetched once more on every retried render instead of thrown
+        if (result.isError) errorResetBoundary?.clearReset()
         unsubscribe()
         resolve()
       }
@@ -405,12 +436,14 @@ export function ScreenQueryProvider({
    * Reuses existing Promise for the same query set
    * @param states - State of every registered query
    * @param queries - Corresponding query array (for key generation)
+   * @param errorResetBoundary - QueryErrorResetBoundary to clear when a query fails
    * @returns Promise that waits for all pending queries to settle
    */
   const createCombinedPromise = useCallback(
     (
       states: readonly RegisteredQueryState[],
       queries: readonly ScreenQuery[],
+      errorResetBoundary?: ErrorResetBoundary,
     ) => {
       const querySetKey = generateQuerySetKey(queries)
 
@@ -419,7 +452,11 @@ export function ScreenQueryProvider({
       // Create new Promise if none exists
       const combinedPromise =
         existingPromise ??
-        Promise.all(states.map(createObserverPromise)).then(() => {
+        Promise.all(
+          states.map((state) =>
+            createObserverPromise(state, errorResetBoundary),
+          ),
+        ).then(() => {
           queryPromiseRef.current.delete(querySetKey)
         })
       if (!existingPromise) {
@@ -438,20 +475,24 @@ export function ScreenQueryProvider({
    * @param results - Array of query results to fetch
    * @param options - Optional configuration
    * @param options.suspendOnCreate - If true, throws Promise when observer is first created (default: false)
+   * @param options.errorResetBoundary - The QueryErrorResetBoundary to retry failed queries on reset
    * @returns Array of data
    */
   const getQueryResult = useCallback(
     (
       results: readonly ScreenQueryResult[],
-      options?: { suspendOnCreate?: boolean },
+      options?: GetQueryResultOptions,
     ) => {
-      const { suspendOnCreate = false } = options ?? {}
+      const { suspendOnCreate = false, errorResetBoundary } = options ?? {}
 
       // Register queries and Observers
       const observerCreated = registerQueriesAndObservers(results)
 
       // Read the state of every registered query, not only the ones passed in
-      const failures = readSettledFailures(queryClient, results)
+      // An ErrorBoundary reset asks for every failed query again
+      const failures = errorResetBoundary?.isReset()
+        ? new Map<string, QueryState>()
+        : readSettledFailures(queryClient, results)
       const queryStates = readQueryStates(
         observersRef.current,
         results,
@@ -466,7 +507,7 @@ export function ScreenQueryProvider({
         // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
         // When React catches this Promise, it will show the fallback UI and re-render when resolved.
         // This ensures all queries complete before rendering, preventing partial UI updates.
-        throw createCombinedPromise(queryStates, results)
+        throw createCombinedPromise(queryStates, results, errorResetBoundary)
       }
 
       // Check for errors and throw for React ErrorBoundary

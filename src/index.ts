@@ -9,6 +9,7 @@ export { useScreenQueryContext } from './hooks/useScreenQueryContext'
 // Provider
 export {
   type ClearCacheStatus,
+  type ErrorResetBoundary,
   ScreenQueryContext,
   ScreenQueryProvider,
   type ScreenQueryResult,
