@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.1.0
+
+### Features
+
+- **`useSyncQuery`** — reads one query result, or an array of them, through
+  `getQueryResult` inside a component and returns only the data (a single value, or
+  an array in the same order). It passes the `QueryErrorResetBoundary` the component
+  renders under, so `onReset={reset}` on the ErrorBoundary is enough to retry a
+  failed query - no `clearCache` before resetting. Accepts `suspendOnCreate`.
+- **`errorResetBoundary` option on `getQueryResult`** — the value of
+  `useQueryErrorResetBoundary()`. While the boundary is reset, failed queries are
+  fetched again instead of thrown, the same signal TanStack Query's suspense hooks
+  follow. If the retry fails as well, the reset is cleared and the failure is thrown
+  to the ErrorBoundary again rather than fetched once more. Without the option,
+  `clearCache` is still the way to retry.
+- **`ErrorResetBoundary` type** is exported for typing that option.
+
+### Fixes
+
+- **A query that fails without data reaches the ErrorBoundary again.** Since 0.0.3
+  the screen stayed on its loading fallback and fetched the failed query again on
+  every retried render.
+
+  A render retried after a suspend mounts the consumer's observer afresh, and a fresh
+  observer reports a query that failed without data as pending, because it would
+  fetch it on mount (`retryOnMount`). The suspended render never commits, so the
+  consumer never makes that fetch, and the suspend promise made it through the
+  provider's observer instead. `getQueryResult` now checks the cache entry of a passed
+  result that reads as pending. A fetch, `clearCache` and `resetQueries()` all put the
+  entry back to pending, so an `error` status means nothing has asked for the query
+  again: it counts as settled and its error is thrown.
+
 ## 0.0.3
 
 ### Fixes
