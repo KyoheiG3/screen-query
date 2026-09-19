@@ -9,6 +9,7 @@ import { ScreenQueryProvider } from '~/providers/ScreenQueryProvider'
 import {
   createQueryClient,
   delay,
+  suppressConsoleError,
   useTestScreenQueryContext,
 } from '~/test-utils/screen-query'
 
@@ -229,5 +230,125 @@ describe('ScreenQueryProvider through a Suspense boundary', () => {
 
     // Then: Nothing to report
     expect(warnSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('ScreenQueryProvider through a Suspense boundary when the query fails', () => {
+  let queryClient: QueryClient
+  let fetchCount: number
+  let failing: boolean
+  let context: ReturnType<typeof useTestScreenQueryContext> | undefined
+
+  const queryKey = ['suspense-failing-user']
+
+  const queryFn = async () => {
+    fetchCount++
+    await delay(10)
+    if (failing) throw new Error('Fetch failed')
+    return { name: 'Test User' }
+  }
+
+  function Consumer() {
+    // gcTime keeps the failed entry in the cache between the fetch settling and
+    // the retried render, so what is measured is the retry, not garbage collection
+    const query = useQuery({ queryKey, queryFn, gcTime: 60_000 })
+    const [data] = useTestScreenQueryContext().getQueryResult([
+      { ...query, queryKey },
+    ])
+    return `data: ${data.name}`
+  }
+
+  function ContextProbe() {
+    context = useTestScreenQueryContext()
+    return null
+  }
+
+  function tree(attempt = 0) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <ScreenQueryProvider>
+          <ContextProbe />
+          <TestBoundary key={attempt}>
+            <Suspense fallback="loading">
+              <Consumer />
+            </Suspense>
+          </TestBoundary>
+        </ScreenQueryProvider>
+      </QueryClientProvider>
+    )
+  }
+
+  beforeEach(() => {
+    // Given: Initialize new QueryClient
+    queryClient = createQueryClient()
+    fetchCount = 0
+    failing = true
+    context = undefined
+    suppressConsoleError()
+  })
+
+  afterEach(() => {
+    // Cleanup after test
+    vi.restoreAllMocks()
+    queryClient.clear()
+  })
+
+  it('should throw the failure to the ErrorBoundary instead of fetching it again', async () => {
+    // Given: A query that keeps failing
+    // When: A suspended consumer reads it and React retries the render once the
+    // fetch settles - with a fresh consumer observer that reports the failed query
+    // as pending, since it would fetch it on mount
+    render(tree())
+    expect(screen.getByText('loading')).toBeTruthy()
+
+    // Then: The failure reaches the ErrorBoundary after a single fetch, rather than
+    // the suspend promise fetching it again on every retried render
+    await waitFor(() => {
+      expect(screen.getByText('error: Fetch failed')).toBeTruthy()
+    })
+    await delay(50)
+    expect(fetchCount).toBe(1)
+  })
+
+  it('should fetch the failed query again once clearCache rewinds it', async () => {
+    // Given: A consumer showing its failure through the ErrorBoundary
+    const { rerender } = render(tree())
+    await waitFor(() => {
+      expect(screen.getByText('error: Fetch failed')).toBeTruthy()
+    })
+    failing = false
+
+    // When: The failed queries are cleared and the ErrorBoundary is reset
+    await act(async () => {
+      await context?.clearCache('error')
+    })
+    rerender(tree(1))
+
+    // Then: The query is fetched again and the screen recovers
+    expect(screen.getByText('loading')).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.getByText('data: Test User')).toBeTruthy()
+    })
+    expect(fetchCount).toBeGreaterThan(1)
+  })
+
+  it('should keep throwing the failure when the ErrorBoundary is reset alone', async () => {
+    // Given: A consumer showing its failure through the ErrorBoundary
+    const { rerender } = render(tree())
+    await waitFor(() => {
+      expect(screen.getByText('error: Fetch failed')).toBeTruthy()
+    })
+    failing = false
+
+    // When: The ErrorBoundary is reset without clearing the failed query
+    rerender(tree(1))
+
+    // Then: The settled failure is thrown again without a fetch - retrying is
+    // clearCache's job, as the error recovery pattern documents
+    await waitFor(() => {
+      expect(screen.getByText('error: Fetch failed')).toBeTruthy()
+    })
+    await delay(50)
+    expect(fetchCount).toBe(1)
   })
 })

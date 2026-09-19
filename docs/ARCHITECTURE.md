@@ -116,6 +116,19 @@ its `data` is still `undefined`, so the declared return type - data, never
 `undefined` - holds. For the same reason the error thrown to the ErrorBoundary comes
 from those results.
 
+One passed result is not taken at its word: a result that reads as pending while its
+cache entry has already settled with an error (`readSettledFailures`). A render retried
+after a suspend mounts the consumer's observer afresh, and a fresh observer reports a
+query that failed without data as pending, because it would fetch it on mount
+(`retryOnMount`). The consumer never makes that fetch - the render is suspended and
+never commits - so trusting the result would have the suspend promise fetch it through
+the provider's observer instead, on every retried render, and a query that keeps
+failing would never reach the ErrorBoundary. The cache entry is what tells the two
+apart: fetching a query without data puts it back to pending, as do `clearCache` and
+`resetQueries()`, so an `error` status means nothing has asked for it again. Such a
+query counts as settled, and the error it settled with is thrown. Retrying it is
+`clearCache`'s job (see "Error Recovery" in the README).
+
 Observer snapshots cover the queries nobody passed this render, which is what keeps
 components that resolve at different times from painting in parts. Reading their live
 state instead would gate a screen on queries no live screen holds: a query the

@@ -4,6 +4,7 @@ import {
   type QueryKey,
   QueryObserver,
   type QueryObserverBaseResult,
+  type QueryState,
   useQueryClient,
 } from '@tanstack/react-query'
 import type React from 'react'
@@ -190,12 +191,50 @@ type RegisteredQueryState = {
 }
 
 /**
+ * Read the failures among the queries the caller passed: queries whose cache entry
+ * has settled with an error and no data, while the result passed for them reads as
+ * pending.
+ *
+ * A render retried after a suspend mounts the consumer's observer afresh, and a
+ * fresh observer reports a query that failed without data as pending - it expects to
+ * fetch it on mount (`retryOnMount`). The consumer never makes that fetch: the render
+ * is suspended and never commits. Taking the result at its word would make the
+ * suspend promise fetch it through the provider's observer instead, so a query that
+ * keeps failing would be fetched again on every retried render and never reach the
+ * ErrorBoundary. The cache entry tells the two apart - a fetch puts a query without
+ * data back to pending, and so do `clearCache` and `resetQueries()`, so an `error`
+ * status means nothing has asked for it again.
+ * @param queryClient - TanStack Query's QueryClient
+ * @param results - Query results the caller passed
+ * @returns Settled cache state of each failed query, keyed by query key string
+ */
+function readSettledFailures(
+  queryClient: QueryClient,
+  results: readonly ScreenQueryResult[],
+) {
+  const failures = new Map<string, QueryState>()
+
+  for (const result of results) {
+    if (!result.isPending) continue
+
+    const state = queryClient.getQueryState(result.queryKey)
+    if (state?.status === 'error') {
+      failures.set(getQueryKeyString(result), state)
+    }
+  }
+
+  return failures
+}
+
+/**
  * Read the state of every registered query.
  *
  * A result the caller passed decides for its own query. It is recomputed from the
  * live cache entry on every render and it is what `getQueryResult` hands back, so
  * deciding from it keeps the suspend decision and the returned data in step - a
- * query can never be treated as settled while its data is still `undefined`.
+ * query can never be treated as settled while its data is still `undefined`. The
+ * one exception is a query that already failed (`readSettledFailures`): it is
+ * settled, and it is thrown rather than returned.
  *
  * A provider-owned observer only reports what it saw when the query last settled:
  * it is unsubscribed as soon as its suspend Promise resolves, and a query rewound
@@ -205,11 +244,13 @@ type RegisteredQueryState = {
  * screen suspended together.
  * @param observers - Registered Observers, keyed by query key string
  * @param results - Query results the caller passed
+ * @param failures - Passed queries that already failed
  * @returns State of every registered query
  */
 function readQueryStates(
   observers: Map<string, QueryObserver>,
   results: readonly ScreenQueryResult[],
+  failures: ReadonlyMap<string, QueryState>,
 ): RegisteredQueryState[] {
   const passed = new Map(
     results.map((result) => [getQueryKeyString(result), result]),
@@ -217,7 +258,9 @@ function readQueryStates(
 
   return [...observers].map(([keyString, observer]) => ({
     observer,
-    isPending: (passed.get(keyString) ?? observer.getCurrentResult()).isPending,
+    isPending:
+      !failures.has(keyString) &&
+      (passed.get(keyString) ?? observer.getCurrentResult()).isPending,
   }))
 }
 
@@ -273,12 +316,24 @@ function createObserverPromise({ observer, isPending }: RegisteredQueryState) {
  * `throwOnError` of useSuspenseQuery/useSuspenseInfiniteQuery
  * (`query.state.data === undefined`). This keeps partial data visible when a
  * refetch or fetchNextPage fails, instead of tearing down the screen via the
- * ErrorBoundary.
- * @param results - Array of QueryObserverBaseResult to check
+ * ErrorBoundary. A passed query that already failed while its result reads as
+ * pending contributes the error its cache entry settled with.
+ * @param results - Query results the caller passed
+ * @param failures - Passed queries that already failed
  * @returns The first error found, or undefined if no errors
  */
-function getQueryError(results: readonly QueryObserverBaseResult[]) {
-  return results.find((q) => q.isError && q.data === undefined)?.error
+function getQueryError(
+  results: readonly ScreenQueryResult[],
+  failures: ReadonlyMap<string, QueryState>,
+) {
+  for (const result of results) {
+    if (result.isError && result.data === undefined) return result.error
+
+    const failure = failures.get(getQueryKeyString(result))
+    if (failure) return failure.error
+  }
+
+  return undefined
 }
 
 /**
@@ -396,7 +451,12 @@ export function ScreenQueryProvider({
       const observerCreated = registerQueriesAndObservers(results)
 
       // Read the state of every registered query, not only the ones passed in
-      const queryStates = readQueryStates(observersRef.current, results)
+      const failures = readSettledFailures(queryClient, results)
+      const queryStates = readQueryStates(
+        observersRef.current,
+        results,
+        failures,
+      )
 
       // Check loading state and throw Promise for React Suspense
       if (
@@ -410,7 +470,7 @@ export function ScreenQueryProvider({
       }
 
       // Check for errors and throw for React ErrorBoundary
-      const error = getQueryError(results)
+      const error = getQueryError(results, failures)
       if (error) {
         // React ErrorBoundary pattern: Throwing an Error triggers the nearest ErrorBoundary.
         // This provides consistent error handling across all queries in the component.
@@ -422,7 +482,7 @@ export function ScreenQueryProvider({
       // return type holds
       return results.map((q) => q.data)
     },
-    [registerQueriesAndObservers, createCombinedPromise],
+    [queryClient, registerQueriesAndObservers, createCombinedPromise],
   ) as GetQueryResult
 
   /**
