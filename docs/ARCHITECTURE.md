@@ -40,6 +40,7 @@ useScreenQueryContext    useQueryKey
 - **ScreenQueryContext**: Context that child components access
 - **useScreenQueryContext**: Hook to access the context
 - **useQueryKey**: Helper hook that wraps useQuery and includes queryKey in return value
+- **useSyncQuery**: Hook that reads query results through `getQueryResult`, passing the `QueryErrorResetBoundary` the component renders under
 
 ## ScreenQueryProvider Mechanism
 
@@ -115,6 +116,25 @@ decision and the returned data in step: a query cannot be treated as settled whi
 its `data` is still `undefined`, so the declared return type - data, never
 `undefined` - holds. For the same reason the error thrown to the ErrorBoundary comes
 from those results.
+
+One passed result is not taken at its word: a result that reads as pending while its
+cache entry has already settled with an error (`readSettledFailures`). A render retried
+after a suspend mounts the consumer's observer afresh, and a fresh observer reports a
+query that failed without data as pending, because it would fetch it on mount
+(`retryOnMount`). The consumer never makes that fetch - the render is suspended and
+never commits - so trusting the result would have the suspend promise fetch it through
+the provider's observer instead, on every retried render, and a query that keeps
+failing would never reach the ErrorBoundary. The cache entry is what tells the two
+apart: fetching a query without data puts it back to pending, as do `clearCache` and
+`resetQueries()`, so an `error` status means nothing has asked for it again. Such a
+query counts as settled, and the error it settled with is thrown.
+
+Retrying it takes an explicit request: `clearCache`, or a reset `QueryErrorResetBoundary`
+passed as `errorResetBoundary`. While it is reset, failed queries are fetched instead of
+thrown, as TanStack Query's suspense hooks do. The reset holds until a query read under
+it commits, and a retried render never commits, so a retry that fails again clears it
+from the suspend promise (`createObserverPromise`) - otherwise every retried render
+would fetch the query once more.
 
 Observer snapshots cover the queries nobody passed this render, which is what keeps
 components that resolve at different times from painting in parts. Reading their live

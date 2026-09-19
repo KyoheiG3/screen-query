@@ -10,6 +10,45 @@ Hook to access ScreenQueryProvider context and retrieve query management functio
 const { getQueryResult, refetchQueries, clearCache } = useScreenQueryContext()
 ```
 
+### useSyncQuery
+
+Hook that reads one query result, or an array of them, synchronously. Loading suspends,
+a failure without data is thrown to the ErrorBoundary, and only the data comes back. It
+passes the `QueryErrorResetBoundary` the component renders under to `getQueryResult`
+(`errorResetBoundary`), so an ErrorBoundary reset with `onReset={reset}` fetches failed
+queries again without `clearCache`.
+
+```typescript
+// Single result
+const user = useSyncQuery(userQuery)
+
+// Several results, resolved together
+const [user, posts] = useSyncQuery([userQuery, postsQuery])
+
+// With suspendOnCreate option
+const user = useSyncQuery(userQuery, { suspendOnCreate: true })
+```
+
+**Parameters**:
+- `result` - A query result with `queryKey` included (`useQueryKey` / `useInfiniteQueryKey`), or an array of them
+- `options` - Optional configuration
+  - `suspendOnCreate` - If true, suspends when an observer is first created (default: `false`)
+
+**Returns**: The data, or an array of data in the same order as the input
+
+**Type Signature**:
+```typescript
+function useSyncQuery<T, E>(
+  result: ScreenQueryResult<T, E>,
+  options?: { suspendOnCreate?: boolean },
+): T
+
+function useSyncQuery<T extends readonly ScreenQueryResult[]>(
+  results: [...T],
+  options?: { suspendOnCreate?: boolean },
+): { [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never }
+```
+
 ### useQueryKey
 
 A wrapper hook around `useQuery` that automatically includes `queryKey` in the return value, simplifying usage with `getQueryResult`.
@@ -125,11 +164,12 @@ const [repos, user] = getQueryResult(
 - `results` - Array of query results from `useQuery` (must include `queryKey`)
 - `options` - Optional configuration
   - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
+  - `errorResetBoundary` - The `QueryErrorResetBoundary` the caller renders under (`useQueryErrorResetBoundary()`). While it is reset, a failed query is fetched again instead of thrown; without it, only `clearCache` retries a failed query
 
 **Behavior**:
 - Any query registered on the screen is loading → Throws Promise (caught by Suspense)
 - Observer created with `suspendOnCreate: true` → Throws Promise (caught by Suspense)
-- Query has error → Throws Error (caught by ErrorBoundary)
+- Query has error → Throws Error (caught by ErrorBoundary), until `clearCache` or a reset `errorResetBoundary` asks for it again
 - Query succeeds → Returns array of data
 
 **Type Signature**:
@@ -137,7 +177,10 @@ const [repos, user] = getQueryResult(
 type GetQueryResult = {
   <T extends readonly ScreenQueryResult[]>(
     results: [...T],
-    options?: { suspendOnCreate?: boolean },
+    options?: {
+      suspendOnCreate?: boolean
+      errorResetBoundary?: ErrorResetBoundary
+    },
   ): {
     [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never
   }
