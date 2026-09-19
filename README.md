@@ -86,6 +86,15 @@ function UserProfile({ userId }) {
   )
 }
 
+// The same reads with useQueryKey and useSyncQuery (recommended)
+function UserProfileWithHooks({ userId }) {
+  const [userData, postsData] = useSyncQuery([
+    useQueryKey({ queryKey: ['user', userId], queryFn: () => fetchUser(userId) }),
+    useQueryKey({ queryKey: ['posts', userId], queryFn: () => fetchUserPosts(userId) }),
+  ])
+  // ...
+}
+
 // Wrap with Suspense and ErrorBoundary
 function UserProfilePage() {
   return (
@@ -130,6 +139,30 @@ const [postsData] = getQueryResult([posts])
 ```
 
 - **Returns**: the standard `useQuery` / `useInfiniteQuery` result plus a `queryKey` property (`UseQueryKeyResult` / `UseInfiniteQueryKeyResult`)
+
+### `useSyncQuery(result, options?)`
+
+Reads one query result, or an array of them, synchronously inside a component: loading
+suspends, a failure without data is thrown to the ErrorBoundary, and only the data comes
+back. It passes the `QueryErrorResetBoundary` the component renders under to
+`getQueryResult`, so an ErrorBoundary reset retries failed queries - see
+[Error Recovery](#error-recovery).
+
+```tsx
+import { useQueryKey, useSyncQuery } from 'screen-query'
+
+// A single result returns its data
+const user = useSyncQuery(useQueryKey({ queryKey: ['user'], queryFn: fetchUser }))
+
+// An array returns the data in the same order, resolved together
+const [userData, postsData] = useSyncQuery([userQuery, postsQuery])
+```
+
+- **Parameters**:
+  - `result` - A query result with `queryKey` included, or an array of them
+  - `options` - Optional configuration
+    - `suspendOnCreate` - If true, suspends when an observer is first created (default: `false`)
+- **Returns**: The data, or an array of data in the same order as the input
 
 ### `useScreenQueryContext()`
 
@@ -208,21 +241,15 @@ function RefreshableScreen() {
 ### Error Recovery
 
 A query that failed without data is thrown to the ErrorBoundary and stays failed until
-something asks for it again. Pass the `QueryErrorResetBoundary` the component renders
-under to `getQueryResult`, and resetting the ErrorBoundary together with it is enough -
-the same pattern TanStack Query's suspense hooks use:
+something asks for it again. Read queries with `useSyncQuery`, and resetting the
+ErrorBoundary together with its `QueryErrorResetBoundary` is enough - the same pattern
+TanStack Query's suspense hooks use:
 
 ```tsx
-import {
-  QueryErrorResetBoundary,
-  useQueryErrorResetBoundary,
-} from '@tanstack/react-query'
+import { QueryErrorResetBoundary } from '@tanstack/react-query'
 
 function UserProfile() {
-  const { getQueryResult } = useScreenQueryContext()
-  const errorResetBoundary = useQueryErrorResetBoundary()
-  const user = useQueryKey({ queryKey: ['user'], queryFn: fetchUser })
-  const [userData] = getQueryResult([user], { errorResetBoundary })
+  const userData = useSyncQuery(useQueryKey({ queryKey: ['user'], queryFn: fetchUser }))
   // ...
 }
 
@@ -250,7 +277,9 @@ function ErrorBoundaryWithRetry({ children }) {
 If the retried fetch fails as well, the failure is thrown to the ErrorBoundary again
 rather than fetched once more.
 
-Without `errorResetBoundary`, clear the failed queries before resetting instead:
+When calling `getQueryResult` directly, pass the boundary yourself
+(`getQueryResult(results, { errorResetBoundary: useQueryErrorResetBoundary() })`).
+Without it, clear the failed queries before resetting instead:
 
 ```tsx
 function ErrorBoundaryWithRetry({ children }) {

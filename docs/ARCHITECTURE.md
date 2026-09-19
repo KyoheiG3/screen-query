@@ -40,6 +40,7 @@ useScreenQueryContext    useQueryKey
 - **ScreenQueryContext**: Context that child components access
 - **useScreenQueryContext**: Hook to access the context
 - **useQueryKey**: Helper hook that wraps useQuery and includes queryKey in return value
+- **useSyncQuery**: Hook that reads query results through `getQueryResult`, passing the `QueryErrorResetBoundary` the component renders under
 
 ## ScreenQueryProvider Mechanism
 

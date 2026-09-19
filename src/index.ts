@@ -6,6 +6,7 @@ export {
   useQueryKey,
 } from './hooks/useQueryKey'
 export { useScreenQueryContext } from './hooks/useScreenQueryContext'
+export { useSyncQuery } from './hooks/useSyncQuery'
 // Provider
 export {
   type ClearCacheStatus,
