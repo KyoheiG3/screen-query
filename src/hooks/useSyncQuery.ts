@@ -1,4 +1,8 @@
-import { useQueryErrorResetBoundary } from '@tanstack/react-query'
+import {
+  type QueryKey,
+  useQueryErrorResetBoundary,
+} from '@tanstack/react-query'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ScreenQueryResult } from '~/providers/ScreenQueryProvider'
 import { useScreenQueryContext } from './useScreenQueryContext'
 
@@ -51,13 +55,31 @@ export function useSyncQuery(
   result: ScreenQueryResult | ScreenQueryResult[],
   options?: SyncQueryOptions,
 ) {
-  const { getQueryResult } = useScreenQueryContext()
+  const { getQueryResult, retainQueries } = useScreenQueryContext()
   const errorResetBoundary = useQueryErrorResetBoundary()
   const isArray = Array.isArray(result)
-  const results = getQueryResult(isArray ? result : [result], {
+  const results = isArray ? result : [result]
+
+  // Keyed by the serialized keys so a new result object for the same queries
+  // does not release and hold them on every render
+  const queryKeys = JSON.stringify(results.map((query) => query.queryKey))
+  useEffect(
+    () => retainQueries(JSON.parse(queryKeys) as QueryKey[]),
+    [retainQueries, queryKeys],
+  )
+
+  // Set before passive effects, so a re-render a layout effect schedules right
+  // after the first commit already counts as on screen
+  const mounted = useRef(false)
+  useLayoutEffect(() => {
+    mounted.current = true
+  }, [])
+
+  const data = getQueryResult(results, {
     ...options,
     errorResetBoundary,
+    mounted: mounted.current,
   })
 
-  return isArray ? results : results[0]
+  return isArray ? data : data[0]
 }

@@ -53,6 +53,14 @@ type GetQueryResultOptions = {
    * again instead of thrown; without it, only `clearCache` retries a failed query.
    */
   errorResetBoundary?: ErrorResetBoundary
+  /**
+   * Whether the caller is already on screen (default: false). A caller that is
+   * on screen waits only for the queries it passes: the queries others registered
+   * belong to components still resolving, and waiting for them would take down
+   * what is already painted. Passing it also hands the queries' registration to
+   * `retainQueries`; a call that omits it keeps its queries registered for good.
+   */
+  mounted?: boolean
 }
 
 /**
@@ -95,6 +103,15 @@ export type ScreenQueryContextValue = {
    * @returns Promise that resolves when cache is cleared
    */
   clearCache: (status: ClearCacheStatus) => Promise<void>
+  /**
+   * Hold queries in the registration while a component on screen reads them.
+   * A query nothing holds any more leaves the registration once the release has
+   * settled, so `refetchQueries` and the suspend decision no longer include it.
+   * A query a `getQueryResult` call without `mounted` registered stays.
+   * @param queryKeys - Keys of the queries the component reads
+   * @returns Function that releases them
+   */
+  retainQueries: (queryKeys: readonly QueryKey[]) => () => void
 }
 
 /**
@@ -209,8 +226,21 @@ function warnDetachedQuery(
  * wait on to learn that it settled.
  */
 type RegisteredQueryState = {
+  keyString: string
   observer: QueryObserver
   isPending: boolean
+}
+
+/**
+ * What the provider knows about a registered query besides its Observer.
+ * - `passedPending` - Whether the result last passed for it read as pending
+ * - `registeredBy` - Who registered it last: `direct` (a call without `mounted`;
+ *   it stays for good, so a later call does not change it), `mounting` (a caller
+ *   coming on screen) or `mounted` (a caller already on screen)
+ */
+type Registration = {
+  passedPending: boolean
+  registeredBy: 'direct' | 'mounting' | 'mounted'
 }
 
 /**
@@ -251,7 +281,31 @@ function readSettledFailures(
 }
 
 /**
- * Read the state of every registered query.
+ * Whether a registered query reads as pending: its observer's snapshot says so and
+ * the result last passed for it did too.
+ *
+ * A provider-owned observer only reports what it saw when the query last settled:
+ * it is unsubscribed as soon as its suspend Promise resolves, and a query rewound in
+ * place - `resetQueries()` keeps the same Query object and only puts its state back
+ * to pending - notifies nobody who is not subscribed. A caller that got a result it
+ * could paint (placeholder data) painted it, while the observer nobody subscribes to
+ * would report the query as pending for good, so that result also counts.
+ * @param observer - Provider-owned Observer of the query
+ * @param registration - What is known about the query
+ * @returns true if the query reads as pending
+ */
+function isRegisteredPending(
+  observer: QueryObserver,
+  registration: Registration | undefined,
+) {
+  return (
+    registration?.passedPending !== false &&
+    observer.getCurrentResult().isPending
+  )
+}
+
+/**
+ * Read the state of the queries a caller waits for.
  *
  * A result the caller passed decides for its own query. It is recomputed from the
  * live cache entry on every render and it is what `getQueryResult` hands back, so
@@ -260,32 +314,41 @@ function readSettledFailures(
  * one exception is a query that already failed (`readSettledFailures`): it is
  * settled, and it is thrown rather than returned.
  *
- * A provider-owned observer only reports what it saw when the query last settled:
- * it is unsubscribed as soon as its suspend Promise resolves, and a query rewound
- * in place - `resetQueries()` keeps the same Query object and only puts its state
- * back to pending - notifies nobody who is not subscribed. So its snapshot decides
- * only for the queries nobody passed this render, which is what keeps the whole
- * screen suspended together.
+ * The other registered queries decide through `isRegisteredPending`, and only the
+ * ones `isPeer` accepts: the queries of components coming on screen alongside the
+ * caller, which is what keeps them from painting in parts.
  * @param observers - Registered Observers, keyed by query key string
  * @param results - Query results the caller passed
  * @param failures - Passed queries that already failed
- * @returns State of every registered query
+ * @param registrations - What is known about each registered query
+ * @param isPeer - Whether the caller waits for a query it did not pass
+ * @returns State of every query the caller waits for
  */
 function readQueryStates(
   observers: Map<string, QueryObserver>,
   results: readonly ScreenQueryResult[],
   failures: ReadonlyMap<string, QueryState>,
+  registrations: ReadonlyMap<string, Registration>,
+  isPeer: (keyString: string) => boolean,
 ): RegisteredQueryState[] {
   const passed = new Map(
     results.map((result) => [getQueryKeyString(result), result]),
   )
 
-  return [...observers].map(([keyString, observer]) => ({
-    observer,
-    isPending:
-      !failures.has(keyString) &&
-      (passed.get(keyString) ?? observer.getCurrentResult()).isPending,
-  }))
+  return [...observers]
+    .filter(([keyString]) => passed.has(keyString) || isPeer(keyString))
+    .map(([keyString, observer]) => {
+      const result = passed.get(keyString)
+      return {
+        keyString,
+        observer,
+        isPending:
+          !failures.has(keyString) &&
+          (result
+            ? result.isPending
+            : isRegisteredPending(observer, registrations.get(keyString))),
+      }
+    })
 }
 
 /**
@@ -298,13 +361,18 @@ function getQueryKeyString(query: ScreenQuery) {
 }
 
 /**
- * Generate unique set key from multiple queries
- * Used as identifier for Promise management
- * @param queries - Array of queries
+ * Generate unique set key from the queries a suspend Promise waits for.
+ * Used as identifier for Promise management: callers that pass the same queries
+ * can still wait for different ones (a mounting caller also waits for its peers),
+ * so the key is taken from what is waited for, not from what was passed
+ * @param states - State of every query the caller waits for
  * @returns Sorted pipe-delimited string
  */
-function generateQuerySetKey(queries: readonly ScreenQuery[]) {
-  return queries.map(getQueryKeyString).sort().join('|')
+function generateQuerySetKey(states: readonly RegisteredQueryState[]) {
+  return states
+    .map((state) => state.keyString)
+    .sort()
+    .join('|')
 }
 
 /**
@@ -393,14 +461,39 @@ export function ScreenQueryProvider({
   const observersRef = useRef<Map<string, QueryObserver>>(new Map())
   const warnedRef = useRef<Set<string>>(new Set())
   const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
+  const registrationsRef = useRef<Map<string, Registration>>(new Map())
+  // Queries that got an Observer since the provider mounted or `clearCache` ran.
+  // `suspendOnCreate` reads it rather than `observersRef`, since the sweep drops
+  // Observers of queries a component can return to
+  const observedKeysRef = useRef<Set<string>>(new Set())
+  // Queries components on screen hold (`retainQueries`), with how many hold each.
+  // A hold keeps its own query: the sweep can drop the registration of a query a
+  // component rendered but has not held yet, before its effect holds it
+  const holdersRef = useRef<Map<string, { query: ScreenQuery; count: number }>>(
+    new Map(),
+  )
+
+  /**
+   * Whether a registered query is on screen: a component holds it, or a call
+   * without `mounted` registered it (nothing can tell when its reader is gone)
+   * @param keyString - Serialized query key
+   * @returns true if the query is on screen
+   */
+  const isOnScreen = useCallback(
+    (keyString: string) =>
+      holdersRef.current.has(keyString) ||
+      registrationsRef.current.get(keyString)?.registeredBy === 'direct',
+    [],
+  )
 
   /**
    * Register queries and Observers or get existing ones
    * @param queries - Array of queries to register
-   * @returns true if an Observer was created for any of the queries
+   * @param mounted - The `mounted` option of the call, undefined if it was omitted
+   * @returns true if any of the queries got its first Observer
    */
   const registerQueriesAndObservers = useCallback(
-    (queries: readonly ScreenQuery[]) => {
+    (queries: readonly ScreenQueryResult[], mounted: boolean | undefined) => {
       // Mapped before reducing so every query is registered, not just the ones
       // before the first newly created Observer
       return queries
@@ -409,6 +502,13 @@ export function ScreenQueryProvider({
 
           // Save query to Map
           queriesRef.current.set(keyString, query)
+          const direct =
+            mounted === undefined ||
+            registrationsRef.current.get(keyString)?.registeredBy === 'direct'
+          registrationsRef.current.set(keyString, {
+            passedPending: query.isPending,
+            registeredBy: direct ? 'direct' : mounted ? 'mounted' : 'mounting',
+          })
 
           // Check for existing Observer, create new if none
           const currentObserver = observersRef.current.get(keyString)
@@ -424,7 +524,9 @@ export function ScreenQueryProvider({
             )
           }
 
-          return !currentObserver
+          const firstObserver = !observedKeysRef.current.has(keyString)
+          observedKeysRef.current.add(keyString)
+          return firstObserver
         })
         .some(Boolean)
     },
@@ -432,20 +534,18 @@ export function ScreenQueryProvider({
   )
 
   /**
-   * Create or get Promise that waits for every registered query to settle
+   * Create or get Promise that waits for every query the caller waits for to settle
    * Reuses existing Promise for the same query set
-   * @param states - State of every registered query
-   * @param queries - Corresponding query array (for key generation)
+   * @param states - State of every query the caller waits for
    * @param errorResetBoundary - QueryErrorResetBoundary to clear when a query fails
    * @returns Promise that waits for all pending queries to settle
    */
   const createCombinedPromise = useCallback(
     (
       states: readonly RegisteredQueryState[],
-      queries: readonly ScreenQuery[],
       errorResetBoundary?: ErrorResetBoundary,
     ) => {
-      const querySetKey = generateQuerySetKey(queries)
+      const querySetKey = generateQuerySetKey(states)
 
       // Check for existing Promise for the same query set
       const existingPromise = queryPromiseRef.current.get(querySetKey)
@@ -486,7 +586,10 @@ export function ScreenQueryProvider({
       const { suspendOnCreate = false, errorResetBoundary } = options ?? {}
 
       // Register queries and Observers
-      const observerCreated = registerQueriesAndObservers(results)
+      const observerCreated = registerQueriesAndObservers(
+        results,
+        options?.mounted,
+      )
 
       // Read the state of every registered query, not only the ones passed in
       // An ErrorBoundary reset asks for every failed query again
@@ -497,6 +600,14 @@ export function ScreenQueryProvider({
         observersRef.current,
         results,
         failures,
+        registrationsRef.current,
+        (keyString) =>
+          // A caller on screen waits only for its own queries. A mounting one waits
+          // for the queries of other components still coming on screen - not the
+          // ones painted components hold or update (a transition, a refetch)
+          !options?.mounted &&
+          !holdersRef.current.has(keyString) &&
+          registrationsRef.current.get(keyString)?.registeredBy !== 'mounted',
       )
 
       // Check loading state and throw Promise for React Suspense
@@ -507,7 +618,7 @@ export function ScreenQueryProvider({
         // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
         // When React catches this Promise, it will show the fallback UI and re-render when resolved.
         // This ensures all queries complete before rendering, preventing partial UI updates.
-        throw createCombinedPromise(queryStates, results, errorResetBoundary)
+        throw createCombinedPromise(queryStates, errorResetBoundary)
       }
 
       // Check for errors and throw for React ErrorBoundary
@@ -527,11 +638,22 @@ export function ScreenQueryProvider({
   ) as GetQueryResult
 
   /**
-   * Refetch all registered queries
+   * Refetch the registered queries that are on screen: the ones components hold,
+   * and the ones a call without `mounted` registered. A query only a render still
+   * resolving - or one React discarded - registered is not on screen yet
    * Used for pull-to-refresh etc.
    */
   const refetchQueries = useCallback(async () => {
-    const queries = [...queriesRef.current.values()]
+    const onScreen = new Map<string, ScreenQuery>()
+    for (const [keyString, query] of queriesRef.current) {
+      if (registrationsRef.current.get(keyString)?.registeredBy === 'direct') {
+        onScreen.set(keyString, query)
+      }
+    }
+    for (const [keyString, { query }] of holdersRef.current) {
+      onScreen.set(keyString, query)
+    }
+    const queries = [...onScreen.values()]
 
     // Set custom notify function to temporarily ignore notifications
     notifyManager.setNotifyFunction(() => {})
@@ -569,6 +691,7 @@ export function ScreenQueryProvider({
         observer.destroy()
       })
       observersRef.current.clear()
+      observedKeysRef.current.clear()
       // Don't clear queriesRef (not for disposal)
 
       // Reset query cache (parallel execution)
@@ -584,6 +707,68 @@ export function ScreenQueryProvider({
       )
     },
     [queryClient],
+  )
+
+  /**
+   * Drop the registered queries that are not on screen and nobody waits for: the
+   * ones a caller already on screen registered last (a deferred render, discarded
+   * or still resolving - nobody else waits for it), and the settled ones. A render
+   * still resolving a dropped query registers it again when it retries.
+   *
+   * What stays is a pending query a mounting render registered, since the other
+   * mounting components wait for it.
+   *
+   * The Observer is not destroyed: a suspend Promise may still be subscribed to it,
+   * and it detaches itself once the query settles.
+   */
+  const dropUnheldQueries = useCallback(() => {
+    // Walked from the queries, not the Observers: `clearCache` empties the latter
+    for (const keyString of queriesRef.current.keys()) {
+      if (isOnScreen(keyString)) continue
+
+      const observer = observersRef.current.get(keyString)
+      const registration = registrationsRef.current.get(keyString)
+      if (
+        registration?.registeredBy === 'mounting' &&
+        observer &&
+        isRegisteredPending(observer, registration)
+      ) {
+        continue
+      }
+
+      queriesRef.current.delete(keyString)
+      observersRef.current.delete(keyString)
+      registrationsRef.current.delete(keyString)
+    }
+  }, [isOnScreen])
+
+  /**
+   * Hold queries while a component on screen reads them
+   * @param queryKeys - Keys of the queries the component reads
+   * @returns Function that releases them
+   */
+  const retainQueries = useCallback(
+    (queryKeys: readonly QueryKey[]) => {
+      const keyStrings = queryKeys.map((queryKey) => JSON.stringify(queryKey))
+      const holders = holdersRef.current
+      queryKeys.forEach((queryKey, index) => {
+        const keyString = keyStrings[index]
+        const count = (holders.get(keyString)?.count ?? 0) + 1
+        holders.set(keyString, { query: { queryKey }, count })
+      })
+
+      return () => {
+        for (const keyString of keyStrings) {
+          const hold = holders.get(keyString)
+          if (hold && hold.count > 1) hold.count--
+          else holders.delete(keyString)
+        }
+        // Dropped once the commit has settled: StrictMode and a key that moves
+        // between components release and hold it again within the same commit
+        queueMicrotask(dropUnheldQueries)
+      }
+    },
+    [dropUnheldQueries],
   )
 
   // Clean up all Observers when Provider unmounts
@@ -603,6 +788,7 @@ export function ScreenQueryProvider({
         getQueryResult,
         refetchQueries,
         clearCache,
+        retainQueries,
       }}
     >
       {children}
