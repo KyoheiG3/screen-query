@@ -182,4 +182,38 @@ describe('useSyncQuery', () => {
     })
     expect(fetchCount).toBeGreaterThan(1)
   })
+
+  it('should keep a gcTime: 0 query through the gap between resolving and committing', async () => {
+    // Given: A query collectable the moment nothing observes it (createQueryClient
+    // defaults to gcTime: 0), settling on a timer as it would over the network
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let fetchCount = 0
+    function Consumer() {
+      const name = useSyncQuery(
+        useQueryKey({
+          queryKey: ['collectable'],
+          // Fresh for good, so a fetch beyond the first can only come from the
+          // query being collected and rebuilt, not from refetching stale data
+          staleTime: Number.POSITIVE_INFINITY,
+          queryFn: async () => {
+            fetchCount++
+            await delay(10)
+            return 'Test User'
+          },
+        }),
+      )
+      return `data: ${name}`
+    }
+
+    // When: It resolves and the retried render commits
+    render(tree(<Consumer />))
+    await waitFor(() => {
+      expect(screen.getByText('data: Test User')).toBeTruthy()
+    })
+
+    // Then: The query was not collected on the way, so it was fetched once and
+    // nothing was reported as replaced
+    expect(fetchCount).toBe(1)
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
 })

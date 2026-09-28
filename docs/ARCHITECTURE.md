@@ -238,7 +238,14 @@ observer neither keeps its query in the cache nor hears about it:
   the fetch settling and the retried render committing, the query can have **zero
   observers**. A `gcTime: 0` entry is garbage collected in that window, and the
   consumer rebuilds it as pending on its next render while the provider's observer
-  still holds the collected one.
+  still holds the collected one. For `useSyncQuery` the window is closed: while a
+  query it reads is pending, the provider keeps a second subscription on its observer
+  (a bridge) until the component holds the query (`retainQueries`), which happens
+  after the consumer's own observer has subscribed in the same commit. A query that
+  fails drops its bridge at once - it is thrown to the ErrorBoundary rather than
+  committed, and its retry has to be fetched by the suspend promise subscribing
+  afresh. A direct `getQueryResult` call holds nothing, so the window stays open
+  for it.
 
 An observer holding a detached query is not just stale, it is inert: the suspend
 promise waiting on it would subscribe to - and fetch - the query the cache has

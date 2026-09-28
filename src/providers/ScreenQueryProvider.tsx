@@ -466,6 +466,20 @@ export function ScreenQueryProvider({
   // `suspendOnCreate` reads it rather than `observersRef`, since the sweep drops
   // Observers of queries a component can return to
   const observedKeysRef = useRef<Set<string>>(new Set())
+  // Subscriptions that keep a query observed from its suspend until a component
+  // holds it. The suspend Promise unsubscribes as soon as the query settles, and the
+  // consumer's own observer subscribes only once the retried render commits: in
+  // between nothing observes the query, and a `gcTime: 0` entry is collected
+  const bridgesRef = useRef<Map<string, () => void>>(new Map())
+
+  /**
+   * Stop keeping a query observed for a component that is about to hold it
+   * @param keyString - Serialized query key
+   */
+  const releaseBridge = useCallback((keyString: string) => {
+    bridgesRef.current.get(keyString)?.()
+    bridgesRef.current.delete(keyString)
+  }, [])
   // Queries components on screen hold (`retainQueries`), with how many hold each.
   // A hold keeps its own query: the sweep can drop the registration of a query a
   // component rendered but has not held yet, before its effect holds it
@@ -618,6 +632,22 @@ export function ScreenQueryProvider({
         // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
         // When React catches this Promise, it will show the fallback UI and re-render when resolved.
         // This ensures all queries complete before rendering, preventing partial UI updates.
+        // Only a caller that holds its queries (`mounted` passed) ever releases the
+        // bridge, so a direct call is left as it was
+        if (options?.mounted !== undefined) {
+          for (const { keyString, observer, isPending } of queryStates) {
+            if (!isPending || bridgesRef.current.has(keyString)) continue
+            if (holdersRef.current.has(keyString)) continue
+            bridgesRef.current.set(
+              keyString,
+              // A failure is thrown to the ErrorBoundary and never commits, and the
+              // retry must be fetched by the suspend Promise subscribing afresh
+              observer.subscribe((result) => {
+                if (result.isError) releaseBridge(keyString)
+              }),
+            )
+          }
+        }
         throw createCombinedPromise(queryStates, errorResetBoundary)
       }
 
@@ -634,7 +664,12 @@ export function ScreenQueryProvider({
       // return type holds
       return results.map((q) => q.data)
     },
-    [queryClient, registerQueriesAndObservers, createCombinedPromise],
+    [
+      queryClient,
+      registerQueriesAndObservers,
+      createCombinedPromise,
+      releaseBridge,
+    ],
   ) as GetQueryResult
 
   /**
@@ -692,6 +727,7 @@ export function ScreenQueryProvider({
       })
       observersRef.current.clear()
       observedKeysRef.current.clear()
+      bridgesRef.current.clear()
       // Don't clear queriesRef (not for disposal)
 
       // Reset query cache (parallel execution)
@@ -736,11 +772,12 @@ export function ScreenQueryProvider({
         continue
       }
 
+      releaseBridge(keyString)
       queriesRef.current.delete(keyString)
       observersRef.current.delete(keyString)
       registrationsRef.current.delete(keyString)
     }
-  }, [isOnScreen])
+  }, [isOnScreen, releaseBridge])
 
   /**
    * Hold queries while a component on screen reads them
@@ -755,6 +792,9 @@ export function ScreenQueryProvider({
         const keyString = keyStrings[index]
         const count = (holders.get(keyString)?.count ?? 0) + 1
         holders.set(keyString, { query: { queryKey }, count })
+        // The consumer's own observer subscribed in the same commit, before this
+        // effect, so the query stays observed
+        releaseBridge(keyString)
       })
 
       return () => {
@@ -768,7 +808,7 @@ export function ScreenQueryProvider({
         queueMicrotask(dropUnheldQueries)
       }
     },
-    [dropUnheldQueries],
+    [dropUnheldQueries, releaseBridge],
   )
 
   // Clean up all Observers when Provider unmounts
