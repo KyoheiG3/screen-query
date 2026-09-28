@@ -632,11 +632,14 @@ export function ScreenQueryProvider({
         // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
         // When React catches this Promise, it will show the fallback UI and re-render when resolved.
         // This ensures all queries complete before rendering, preventing partial UI updates.
-        // Only a caller that holds its queries (`mounted` passed) ever releases the
-        // bridge, so a direct call is left as it was
+        // Only the caller's own queries are bridged: it is the one that holds them
+        // once it commits. A peer's queries are bridged by the peer, and a caller
+        // that does not pass `mounted` holds nothing, so it bridges nothing
         if (options?.mounted !== undefined) {
+          const own = new Set(results.map(getQueryKeyString))
           for (const { keyString, observer, isPending } of queryStates) {
-            if (!isPending || bridgesRef.current.has(keyString)) continue
+            if (!own.has(keyString) || !isPending) continue
+            if (bridgesRef.current.has(keyString)) continue
             if (holdersRef.current.has(keyString)) continue
             bridgesRef.current.set(
               keyString,

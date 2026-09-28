@@ -3,7 +3,7 @@ import {
   QueryClientProvider,
   QueryErrorResetBoundary,
 } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React, { Suspense } from 'react'
 import { ScreenQueryProvider } from '~/providers/ScreenQueryProvider'
 import {
@@ -12,6 +12,7 @@ import {
   suppressConsoleError,
 } from '~/test-utils/screen-query'
 import { useQueryKey } from './useQueryKey'
+import { useScreenQueryContext } from './useScreenQueryContext'
 import { useSyncQuery } from './useSyncQuery'
 
 /**
@@ -215,5 +216,54 @@ describe('useSyncQuery', () => {
     // nothing was reported as replaced
     expect(fetchCount).toBe(1)
     expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('should not keep observing a query a direct getQueryResult call reads', async () => {
+    // Given: A direct getQueryResult call and a useSyncQuery caller mount together,
+    // so the latter waits for the former's pending query
+    function Direct() {
+      const context = useScreenQueryContext()
+      const [value] = context.getQueryResult([
+        useQueryKey({
+          queryKey: ['direct'],
+          queryFn: async () => {
+            await delay(10)
+            return 'direct'
+          },
+        }),
+      ])
+      return `direct: ${value} `
+    }
+    function Synced() {
+      return `synced: ${useSyncQuery(useQueryKey({ queryKey: ['synced'], queryFn: async () => 'synced' }))}`
+    }
+    function Page() {
+      const [open, setOpen] = React.useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(false)}>
+            close
+          </button>
+          {open && <Direct />}
+          <Synced />
+        </>
+      )
+    }
+    render(tree(<Page />))
+    await waitFor(() => {
+      expect(screen.getByText(/direct: direct/)).toBeTruthy()
+    })
+
+    // When: The direct caller leaves while the provider stays
+    fireEvent.click(screen.getByText('close'))
+    await delay(0)
+
+    // Then: Nothing is left observing the direct caller's query
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: ['direct'] })
+        ?.getObserversCount(),
+    ).toBe(0)
   })
 })

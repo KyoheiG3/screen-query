@@ -244,8 +244,11 @@ observer neither keeps its query in the cache nor hears about it:
   after the consumer's own observer has subscribed in the same commit. A query that
   fails drops its bridge at once - it is thrown to the ErrorBoundary rather than
   committed, and its retry has to be fetched by the suspend promise subscribing
-  afresh. A direct `getQueryResult` call holds nothing, so the window stays open
-  for it.
+  afresh. A caller bridges only the queries it passed, since only it holds them. A
+  direct `getQueryResult` call holds nothing, so it bridges nothing and the window
+  stays open for it. A bridge on a render React discarded lasts until its query
+  leaves the registration - after the next release on screen - or the provider
+  unmounts; until then its query stays observed.
 
 An observer holding a detached query is not just stale, it is inert: the suspend
 promise waiting on it would subscribe to - and fetch - the query the cache has
