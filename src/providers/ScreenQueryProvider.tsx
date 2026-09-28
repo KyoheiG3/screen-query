@@ -215,8 +215,9 @@ function warnDetachedQuery(
   // biome-ignore lint/suspicious/noConsole: reporting a recovery a caller should know about
   console.warn(
     `[screen-query] The cache entry for ${keyString} was replaced while the screen was resolving it, so its data is being fetched again.\n` +
-      "Expected right after removeQueries()/clear(). Otherwise the query was garbage collected mid-resolution: the Provider releases its observer as soon as the query settles, and the consumer's own observer only subscribes once the retried render commits, so a `gcTime: 0` entry can be collected in between.\n" +
-      'Raise gcTime above that gap (a second is plenty) if this refetch is not intended.',
+      'Expected right after removeQueries()/clear(). For a query read through useSyncQuery that is usually the cause, since useSyncQuery keeps a pending query observed until the component holds it.\n' +
+      "Otherwise the query was most likely read by a direct getQueryResult call and garbage collected mid-resolution: the Provider releases its observer as soon as the query settles, and the consumer's own observer only subscribes once the retried render commits, so a `gcTime: 0` entry can be collected in between.\n" +
+      'Read it through useSyncQuery, or raise gcTime above that gap (a second is plenty), if this refetch is not intended.',
     queryKey,
   )
 }
