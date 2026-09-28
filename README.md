@@ -225,13 +225,13 @@ await clearCache('error') // Clear failed queries
 await clearCache('all')   // Clear everything
 ```
 
-#### `retainQueries(queries)`
+#### `retainQueries(queryKeys)`
 
 Hold queries in the registration while a component on screen reads them; returns the
 function that releases them. `useSyncQuery` calls it for you.
 
 ```tsx
-useEffect(() => retainQueries([{ queryKey: userQuery.queryKey }]), [retainQueries])
+useEffect(() => retainQueries([userQuery.queryKey]), [retainQueries])
 ```
 
 ## Advanced Patterns

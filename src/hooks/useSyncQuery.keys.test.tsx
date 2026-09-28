@@ -57,6 +57,33 @@ function List({ condition, keep }: { condition: string; keep: boolean }) {
   return `rows: ${rows}`
 }
 
+/** A component reading its own query */
+function Item({ id, ms = 30 }: { id: string; ms?: number }) {
+  return `${id}: ${useSyncQuery(useQueryKey({ queryKey: [id], queryFn: () => fetchCondition(id, ms) }))} `
+}
+
+/** Renders both under one boundary, and drops `leaves` once "close" is pressed */
+function Closable({
+  stays,
+  leaves,
+}: {
+  stays: React.ReactNode
+  leaves: React.ReactNode
+}) {
+  const [open, setOpen] = useState(true)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(false)}>
+        close
+      </button>
+      <Suspense fallback={<Fallback />}>
+        {stays}
+        {open && leaves}
+      </Suspense>
+    </>
+  )
+}
+
 /** How the screen hands a new condition to the list */
 type Form =
   | 'state'
@@ -113,6 +140,20 @@ describe('useSyncQuery with a key that changes', () => {
     queryClient.clear()
   })
 
+  /** Refetch every registered query and return the keys fetched again */
+  async function refetchedKeys() {
+    fetched.length = 0
+    await act(async () => {
+      await refetch()
+    })
+    return [...fetched]
+  }
+
+  async function close() {
+    fireEvent.click(screen.getByText('close'))
+    await act(async () => {})
+  }
+
   describe.each<{ form: Form; keeps: boolean }>([
     { form: 'useDeferredValue', keeps: true },
     { form: 'startTransition', keeps: true },
@@ -147,46 +188,26 @@ describe('useSyncQuery with a key that changes', () => {
       else expect(fallbacks).toBeGreaterThan(1)
 
       // Then: Refetching fetches only the key the list reads now
-      fetched.length = 0
-      await act(async () => {
-        await refetch()
-      })
-      expect(fetched).toEqual(['aaa'])
+      expect(await refetchedKeys()).toEqual(['aaa'])
     })
   })
 
   it('should stop refetching the keys of a component that unmounted', async () => {
     // Given: Two components read their own key, then one of them leaves
-    function Other() {
-      return `other: ${useSyncQuery(useQueryKey({ queryKey: ['other'], queryFn: () => fetchCondition('other') }))}`
-    }
-    function Page() {
-      const [open, setOpen] = useState(true)
-      return (
-        <>
-          <button type="button" onClick={() => setOpen(false)}>
-            close
-          </button>
-          <Suspense fallback={<Fallback />}>
-            <List condition="a" keep={false} />
-            {open && <Other />}
-          </Suspense>
-        </>
-      )
-    }
-    render(tree(<Page />))
+    render(
+      tree(
+        <Closable
+          stays={<List condition="a" keep={false} />}
+          leaves={<Item id="other" />}
+        />,
+      ),
+    )
     await waitFor(() => expect(text()).toContain('other: other'))
-    fireEvent.click(screen.getByText('close'))
-    await act(async () => {})
-    fetched.length = 0
+    await close()
 
     // When: Every registered query is refetched
-    await act(async () => {
-      await refetch()
-    })
-
     // Then: Only the component still on screen has its query fetched again
-    expect(fetched).toEqual(['a'])
+    expect(await refetchedKeys()).toEqual(['a'])
   })
 
   it('should keep a key a direct getQueryResult call reads after useSyncQuery releases it', async () => {
@@ -202,64 +223,38 @@ describe('useSyncQuery with a key that changes', () => {
       ])
       return `direct: ${rows}`
     }
-    function Page() {
-      const [open, setOpen] = useState(true)
-      return (
-        <>
-          <button type="button" onClick={() => setOpen(false)}>
-            close
-          </button>
-          <Suspense fallback={<Fallback />}>
-            <Direct />
-            {open && <List condition="a" keep={false} />}
-          </Suspense>
-        </>
-      )
-    }
-    render(tree(<Page />))
+    render(
+      tree(
+        <Closable
+          stays={<Direct />}
+          leaves={<List condition="a" keep={false} />}
+        />,
+      ),
+    )
     await waitFor(() => expect(text()).toContain('rows: a'))
-    fireEvent.click(screen.getByText('close'))
-    await act(async () => {})
-    fetched.length = 0
+    await close()
 
     // When: Every registered query is refetched
-    await act(async () => {
-      await refetch()
-    })
-
     // Then: The key the direct caller still reads is fetched again
-    expect(fetched).toEqual(['a'])
+    expect(await refetchedKeys()).toEqual(['a'])
   })
 
   it('should keep refetching a key another component still reads', async () => {
     // Given: Two components read the same key, then one of them leaves
-    function Page() {
-      const [open, setOpen] = useState(true)
-      return (
-        <>
-          <button type="button" onClick={() => setOpen(false)}>
-            close
-          </button>
-          <Suspense fallback={<Fallback />}>
-            <List condition="a" keep={false} />
-            {open && <List condition="a" keep={false} />}
-          </Suspense>
-        </>
-      )
-    }
-    render(tree(<Page />))
+    render(
+      tree(
+        <Closable
+          stays={<List condition="a" keep={false} />}
+          leaves={<List condition="a" keep={false} />}
+        />,
+      ),
+    )
     await waitFor(() => expect(text()).toContain('rows: arows: a'))
-    fireEvent.click(screen.getByText('close'))
-    await act(async () => {})
-    fetched.length = 0
+    await close()
 
     // When: Every registered query is refetched
-    await act(async () => {
-      await refetch()
-    })
-
     // Then: The key the remaining component reads is fetched again
-    expect(fetched).toEqual(['a'])
+    expect(await refetchedKeys()).toEqual(['a'])
   })
 
   it('should keep a key that is released and held again in the same commit', async () => {
@@ -281,28 +276,19 @@ describe('useSyncQuery with a key that changes', () => {
       ),
     )
     await waitFor(() => expect(text()).toContain('rows: a'))
-    const release = retain([{ queryKey: ['list', 'a'] }])
+    const release = retain([['list', 'a']])
     release()
-    retain([{ queryKey: ['list', 'a'] }])
+    retain([['list', 'a']])
     await act(async () => {})
-    fetched.length = 0
 
     // When: Every registered query is refetched
-    await act(async () => {
-      await refetch()
-    })
-
     // Then: The key is still registered
-    expect(fetched).toEqual(['a'])
+    expect(await refetchedKeys()).toEqual(['a'])
   })
 
   it('should paint components mounting together at once, even under separate boundaries', async () => {
     // Given: Two components mount together under their own boundaries, one of them
     // reading a slower query
-    function Item({ id, ms }: { id: string; ms: number }) {
-      return `${id}: ${useSyncQuery(useQueryKey({ queryKey: [id], queryFn: () => fetchCondition(id, ms) }))} `
-    }
-
     // When: They mount
     render(
       tree(
@@ -326,9 +312,6 @@ describe('useSyncQuery with a key that changes', () => {
 
   it('should not hold a mounting component back for a key a painted component moves to', async () => {
     // Given: The list is on screen, and moves to a slow key in a transition
-    function Other() {
-      return `other: ${useSyncQuery(useQueryKey({ queryKey: ['other'], queryFn: () => fetchCondition('other', 0) }))}`
-    }
     function Page() {
       const [condition, setCondition] = useState('a')
       const [open, setOpen] = useState(false)
@@ -346,7 +329,9 @@ describe('useSyncQuery with a key that changes', () => {
           <Suspense fallback={<Fallback />}>
             <List condition={condition} keep={false} />
           </Suspense>
-          <Suspense fallback={<Fallback />}>{open && <Other />}</Suspense>
+          <Suspense fallback={<Fallback />}>
+            {open && <Item id="other" ms={0} />}
+          </Suspense>
         </>
       )
     }
@@ -369,9 +354,6 @@ describe('useSyncQuery with a key that changes', () => {
   it('should keep waiting for a component still loading when a release sweeps the registration', async () => {
     // Given: A slow component is still loading when the list on screen moves to
     // another key, which releases the old one and sweeps the registration
-    function Item({ id, ms }: { id: string; ms: number }) {
-      return `${id}: ${useSyncQuery(useQueryKey({ queryKey: [id], queryFn: () => fetchCondition(id, ms) }))} `
-    }
     function Page() {
       const [condition, setCondition] = useState('a')
       const [slow, setSlow] = useState(false)

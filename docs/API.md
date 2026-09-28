@@ -260,12 +260,12 @@ longer fetches it. A query a call without `mounted` registered stays registered.
 const { getQueryResult, retainQueries } = useScreenQueryContext()
 
 const [user] = getQueryResult([userQuery], { mounted })
-useEffect(() => retainQueries([{ queryKey: userQuery.queryKey }]), [retainQueries])
+useEffect(() => retainQueries([userQuery.queryKey]), [retainQueries])
 ```
 
 **Type Signature**:
 ```typescript
-retainQueries: (queries: readonly ScreenQuery[]) => () => void
+retainQueries: (queryKeys: readonly QueryKey[]) => () => void
 ```
 
 ## Type Definitions

@@ -59,8 +59,8 @@ const warnedRef = useRef<Set<string>>(new Set())
 // Manages asynchronous Promise handling
 const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
 
-// Whether the result last passed for each query read as pending
-const passedPendingRef = useRef<Map<string, boolean>>(new Map())
+// Whether the result last passed for each query read as pending, and who registered it
+const registrationsRef = useRef<Map<string, Registration>>(new Map())
 
 // How many components on screen hold each query (`retainQueries`)
 const holdersRef = useRef<Map<string, number>>(new Map())

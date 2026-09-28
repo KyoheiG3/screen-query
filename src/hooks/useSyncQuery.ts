@@ -64,10 +64,7 @@ export function useSyncQuery(
   // does not release and hold them on every render
   const queryKeys = JSON.stringify(results.map((query) => query.queryKey))
   useEffect(
-    () =>
-      retainQueries(
-        JSON.parse(queryKeys).map((queryKey: QueryKey) => ({ queryKey })),
-      ),
+    () => retainQueries(JSON.parse(queryKeys) as QueryKey[]),
     [retainQueries, queryKeys],
   )
 
