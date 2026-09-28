@@ -62,8 +62,8 @@ const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
 // Whether the result last passed for each query read as pending, and who registered it
 const registrationsRef = useRef<Map<string, Registration>>(new Map())
 
-// How many components on screen hold each query (`retainQueries`)
-const holdersRef = useRef<Map<string, number>>(new Map())
+// Queries components on screen hold (`retainQueries`), with how many hold each
+const holdersRef = useRef<Map<string, { query: ScreenQuery; count: number }>>(new Map())
 ```
 
 ### Main Functions
@@ -189,7 +189,9 @@ through renders until the query happens to settle on its own.
 
 A query stays registered while a component on screen holds it (`retainQueries`), and
 `refetchQueries` fetches only those, plus the ones a call without `mounted` (a direct
-`getQueryResult` call) registered. A query that only a render still coming on
+`getQueryResult` call) registered. A hold keeps its own query key, because a sweep can
+run between a component's render and its effect - in the gap between two time slices
+of a concurrent render - and drop the registration of a query it is about to hold. A query that only a render still coming on
 screen - or one React discarded - registered is not on screen, so it is not
 refetched.
 

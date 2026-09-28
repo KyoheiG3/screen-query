@@ -462,8 +462,12 @@ export function ScreenQueryProvider({
   const warnedRef = useRef<Set<string>>(new Set())
   const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
   const registrationsRef = useRef<Map<string, Registration>>(new Map())
-  // How many components on screen hold each query (`retainQueries`)
-  const holdersRef = useRef<Map<string, number>>(new Map())
+  // Queries components on screen hold (`retainQueries`), with how many hold each.
+  // A hold keeps its own query: the sweep can drop the registration of a query a
+  // component rendered but has not held yet, before its effect holds it
+  const holdersRef = useRef<Map<string, { query: ScreenQuery; count: number }>>(
+    new Map(),
+  )
 
   /**
    * Whether a registered query is on screen: a component holds it, or a call
@@ -634,9 +638,16 @@ export function ScreenQueryProvider({
    * Used for pull-to-refresh etc.
    */
   const refetchQueries = useCallback(async () => {
-    const queries = [...queriesRef.current]
-      .filter(([keyString]) => isOnScreen(keyString))
-      .map(([, query]) => query)
+    const onScreen = new Map<string, ScreenQuery>()
+    for (const [keyString, query] of queriesRef.current) {
+      if (registrationsRef.current.get(keyString)?.registeredBy === 'direct') {
+        onScreen.set(keyString, query)
+      }
+    }
+    for (const [keyString, { query }] of holdersRef.current) {
+      onScreen.set(keyString, query)
+    }
+    const queries = [...onScreen.values()]
 
     // Set custom notify function to temporarily ignore notifications
     notifyManager.setNotifyFunction(() => {})
@@ -656,7 +667,7 @@ export function ScreenQueryProvider({
       // Restore default notify function, final notification executes at this point
       notifyManager.setNotifyFunction((fn) => fn())
     }
-  }, [queryClient, isOnScreen])
+  }, [queryClient])
 
   /**
    * Clear query cache and reset Observers
@@ -733,14 +744,16 @@ export function ScreenQueryProvider({
     (queryKeys: readonly QueryKey[]) => {
       const keyStrings = queryKeys.map((queryKey) => JSON.stringify(queryKey))
       const holders = holdersRef.current
-      for (const keyString of keyStrings) {
-        holders.set(keyString, (holders.get(keyString) ?? 0) + 1)
-      }
+      queryKeys.forEach((queryKey, index) => {
+        const keyString = keyStrings[index]
+        const count = (holders.get(keyString)?.count ?? 0) + 1
+        holders.set(keyString, { query: { queryKey }, count })
+      })
 
       return () => {
         for (const keyString of keyStrings) {
-          const count = (holders.get(keyString) ?? 0) - 1
-          if (count > 0) holders.set(keyString, count)
+          const hold = holders.get(keyString)
+          if (hold && hold.count > 1) hold.count--
           else holders.delete(keyString)
         }
         // Dropped once the commit has settled: StrictMode and a key that moves

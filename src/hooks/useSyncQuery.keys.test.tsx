@@ -286,6 +286,40 @@ describe('useSyncQuery with a key that changes', () => {
     expect(await refetchedKeys()).toEqual(['a'])
   })
 
+  it('should refetch a held key even if a sweep dropped its registration before the hold', async () => {
+    // Given: A mounting render registered a loaded key without suspending, and a
+    // release swept the registration before the component's effect held the key -
+    // a gap concurrent rendering can leave open between two time slices
+    queryClient.setQueryData(['k'], 'k')
+    let context = {} as ReturnType<typeof useScreenQueryContext>
+    function Probe() {
+      context = useScreenQueryContext()
+      const [value] = context.getQueryResult(
+        [
+          useQueryKey({
+            queryKey: ['k'],
+            queryFn: () => fetchCondition('k'),
+            staleTime: 60_000,
+          }),
+        ],
+        { mounted: false },
+      )
+      refetch = context.refetchQueries
+      return `probe: ${value}`
+    }
+    render(tree(<Probe />))
+    await waitFor(() => expect(text()).toContain('probe: k'))
+    const release = context.retainQueries([['other']])
+    release()
+    await act(async () => {})
+
+    // When: The component holds its key, and every registered query is refetched
+    context.retainQueries([['k']])
+
+    // Then: The held key is fetched again
+    expect(await refetchedKeys()).toEqual(['k'])
+  })
+
   it('should paint components mounting together at once, even under separate boundaries', async () => {
     // Given: Two components mount together under their own boundaries, one of them
     // reading a slower query
