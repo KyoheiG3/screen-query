@@ -1,6 +1,6 @@
 {
   "name": "screen-query",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "React Query integration for synchronous multi-query management with Suspense/ErrorBoundary",
   "author": "KyoheiG3",
   "license": "MIT",
