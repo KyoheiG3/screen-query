@@ -320,6 +320,53 @@ describe('useSyncQuery with a key that changes', () => {
     expect(await refetchedKeys()).toEqual(['k'])
   })
 
+  it('should not suspend a painted component on a key it returns to with suspendOnCreate', async () => {
+    // Given: A list read with suspendOnCreate moves from a to b, which releases a
+    // and sweeps its registration
+    function Filter() {
+      const [condition, setCondition] = useState('a')
+      const rows = useSyncQuery(
+        useQueryKey({
+          queryKey: ['list', condition],
+          queryFn: () => fetchCondition(condition),
+          placeholderData: keepPreviousData,
+        }),
+        { suspendOnCreate: true },
+      )
+      return (
+        <button
+          type="button"
+          onClick={() => setCondition(condition === 'a' ? 'b' : 'a')}
+        >
+          {`rows: ${rows}`}
+        </button>
+      )
+    }
+    render(
+      tree(
+        <Suspense fallback={<Fallback />}>
+          <Filter />
+        </Suspense>,
+      ),
+    )
+    await waitFor(() => expect(text()).toContain('rows: a'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'))
+    })
+    await waitFor(() => expect(text()).toContain('rows: b'))
+    await act(async () => {})
+    const before = fallbacks
+
+    // When: It returns to a, which is still cached
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'))
+    })
+    await waitFor(() => expect(text()).toContain('rows: a'))
+
+    // Then: It paints a without falling back to loading
+    expect(fallbacks).toBe(before)
+  })
+
   it('should paint components mounting together at once, even under separate boundaries', async () => {
     // Given: Two components mount together under their own boundaries, one of them
     // reading a slower query

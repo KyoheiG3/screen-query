@@ -462,6 +462,10 @@ export function ScreenQueryProvider({
   const warnedRef = useRef<Set<string>>(new Set())
   const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
   const registrationsRef = useRef<Map<string, Registration>>(new Map())
+  // Queries that got an Observer since the provider mounted or `clearCache` ran.
+  // `suspendOnCreate` reads it rather than `observersRef`, since the sweep drops
+  // Observers of queries a component can return to
+  const observedKeysRef = useRef<Set<string>>(new Set())
   // Queries components on screen hold (`retainQueries`), with how many hold each.
   // A hold keeps its own query: the sweep can drop the registration of a query a
   // component rendered but has not held yet, before its effect holds it
@@ -486,7 +490,7 @@ export function ScreenQueryProvider({
    * Register queries and Observers or get existing ones
    * @param queries - Array of queries to register
    * @param mounted - The `mounted` option of the call, undefined if it was omitted
-   * @returns true if an Observer was created for any of the queries
+   * @returns true if any of the queries got its first Observer
    */
   const registerQueriesAndObservers = useCallback(
     (queries: readonly ScreenQueryResult[], mounted: boolean | undefined) => {
@@ -520,7 +524,9 @@ export function ScreenQueryProvider({
             )
           }
 
-          return !currentObserver
+          const firstObserver = !observedKeysRef.current.has(keyString)
+          observedKeysRef.current.add(keyString)
+          return firstObserver
         })
         .some(Boolean)
     },
@@ -685,6 +691,7 @@ export function ScreenQueryProvider({
         observer.destroy()
       })
       observersRef.current.clear()
+      observedKeysRef.current.clear()
       // Don't clear queriesRef (not for disposal)
 
       // Reset query cache (parallel execution)

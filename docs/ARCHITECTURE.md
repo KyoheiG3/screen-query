@@ -217,7 +217,9 @@ resolves at 157ms instead of 66ms). A `ScreenQueryProvider` inside the keyed bou
 scopes the registration to the key, so the old request goes with it.
 
 The observer of a dropped query is not destroyed, because a suspend promise may
-still be subscribed to it; it detaches from the query once the query settles.
+still be subscribed to it; it detaches from the query once the query settles. A
+dropped query still counts as observed for `suspendOnCreate`, so a component
+returning to a cached key does not suspend again; only `clearCache` resets that.
 
 ### Observer Lifecycle
 
