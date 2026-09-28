@@ -3,7 +3,7 @@ import {
   QueryClientProvider,
   QueryErrorResetBoundary,
 } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React, { Suspense } from 'react'
 import { ScreenQueryProvider } from '~/providers/ScreenQueryProvider'
 import {
@@ -12,6 +12,7 @@ import {
   suppressConsoleError,
 } from '~/test-utils/screen-query'
 import { useQueryKey } from './useQueryKey'
+import { useScreenQueryContext } from './useScreenQueryContext'
 import { useSyncQuery } from './useSyncQuery'
 
 /**
@@ -181,5 +182,88 @@ describe('useSyncQuery', () => {
       expect(screen.getByText('data: Test User')).toBeTruthy()
     })
     expect(fetchCount).toBeGreaterThan(1)
+  })
+
+  it('should keep a gcTime: 0 query through the gap between resolving and committing', async () => {
+    // Given: A query collectable the moment nothing observes it (createQueryClient
+    // defaults to gcTime: 0), settling on a timer as it would over the network
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let fetchCount = 0
+    function Consumer() {
+      const name = useSyncQuery(
+        useQueryKey({
+          queryKey: ['collectable'],
+          // Fresh for good, so a fetch beyond the first can only come from the
+          // query being collected and rebuilt, not from refetching stale data
+          staleTime: Number.POSITIVE_INFINITY,
+          queryFn: async () => {
+            fetchCount++
+            await delay(10)
+            return 'Test User'
+          },
+        }),
+      )
+      return `data: ${name}`
+    }
+
+    // When: It resolves and the retried render commits
+    render(tree(<Consumer />))
+    await waitFor(() => {
+      expect(screen.getByText('data: Test User')).toBeTruthy()
+    })
+
+    // Then: The query was not collected on the way, so it was fetched once and
+    // nothing was reported as replaced
+    expect(fetchCount).toBe(1)
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('should not keep observing a query a direct getQueryResult call reads', async () => {
+    // Given: A direct getQueryResult call and a useSyncQuery caller mount together,
+    // so the latter waits for the former's pending query
+    function Direct() {
+      const context = useScreenQueryContext()
+      const [value] = context.getQueryResult([
+        useQueryKey({
+          queryKey: ['direct'],
+          queryFn: async () => {
+            await delay(10)
+            return 'direct'
+          },
+        }),
+      ])
+      return `direct: ${value} `
+    }
+    function Synced() {
+      return `synced: ${useSyncQuery(useQueryKey({ queryKey: ['synced'], queryFn: async () => 'synced' }))}`
+    }
+    function Page() {
+      const [open, setOpen] = React.useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(false)}>
+            close
+          </button>
+          {open && <Direct />}
+          <Synced />
+        </>
+      )
+    }
+    render(tree(<Page />))
+    await waitFor(() => {
+      expect(screen.getByText(/direct: direct/)).toBeTruthy()
+    })
+
+    // When: The direct caller leaves while the provider stays
+    fireEvent.click(screen.getByText('close'))
+    await delay(0)
+
+    // Then: Nothing is left observing the direct caller's query
+    expect(
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: ['direct'] })
+        ?.getObserversCount(),
+    ).toBe(0)
   })
 })
