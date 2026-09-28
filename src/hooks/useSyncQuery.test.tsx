@@ -256,14 +256,17 @@ describe('useSyncQuery', () => {
 
     // When: The direct caller leaves while the provider stays
     fireEvent.click(screen.getByText('close'))
-    await delay(0)
 
-    // Then: Nothing is left observing the direct caller's query
-    expect(
-      queryClient
-        .getQueryCache()
-        .find({ queryKey: ['direct'] })
-        ?.getObserversCount(),
-    ).toBe(0)
+    // Then: Nothing is left observing the direct caller's query, once the leaving
+    // component's own observer has unsubscribed in its effect cleanup. An entry
+    // nothing observes is collected at once (gcTime: 0), which counts as none
+    await waitFor(() => {
+      expect(
+        queryClient
+          .getQueryCache()
+          .find({ queryKey: ['direct'] })
+          ?.getObserversCount() ?? 0,
+      ).toBe(0)
+    })
   })
 })
