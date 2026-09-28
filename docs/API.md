@@ -172,10 +172,10 @@ const [repos, user] = getQueryResult(
 - `options` - Optional configuration
   - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
   - `errorResetBoundary` - The `QueryErrorResetBoundary` the caller renders under (`useQueryErrorResetBoundary()`). While it is reset, a failed query is fetched again instead of thrown; without it, only `clearCache` retries a failed query
-  - `mounted` - Whether the caller is already on screen (default: `false`). While true, only the queries passed in this call are waited for
+  - `mounted` - Whether the caller is already on screen (default: `false`). While true, only the queries passed in this call are waited for; while false, also the ones other mounting callers registered. Passing it hands the queries' registration to `retainQueries`
 
 **Behavior**:
-- Any query registered on the screen is loading → Throws Promise (caught by Suspense). A query whose last passed result could be painted (placeholder data) is not waited for by other callers, and a caller already on screen waits only for its own queries
+- A passed query is loading, or - for a caller not on screen yet - a query another mounting caller registered is → Throws Promise (caught by Suspense). A query whose last passed result could be painted (placeholder data) is not waited for through another caller
 - Observer created with `suspendOnCreate: true` → Throws Promise (caught by Suspense)
 - Query has error → Throws Error (caught by ErrorBoundary), until `clearCache` or a reset `errorResetBoundary` asks for it again
 - Query succeeds → Returns array of data
@@ -198,7 +198,7 @@ type GetQueryResult = {
 
 ### refetchQueries
 
-Function that synchronously refetches all registered queries. Used for Pull-to-Refresh and similar operations.
+Function that synchronously refetches the registered queries on screen: the ones components hold and the ones direct `getQueryResult` calls registered. Used for Pull-to-Refresh and similar operations.
 
 ```typescript
 const { refetchQueries } = useScreenQueryContext()

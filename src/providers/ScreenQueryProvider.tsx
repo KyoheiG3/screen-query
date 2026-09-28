@@ -268,7 +268,28 @@ function readSettledFailures(
 }
 
 /**
- * Read the state of every registered query.
+ * Whether a registered query reads as pending: its observer's snapshot says so and
+ * the result last passed for it did too.
+ *
+ * A provider-owned observer only reports what it saw when the query last settled:
+ * it is unsubscribed as soon as its suspend Promise resolves, and a query rewound in
+ * place - `resetQueries()` keeps the same Query object and only puts its state back
+ * to pending - notifies nobody who is not subscribed. A caller that got a result it
+ * could paint (placeholder data) painted it, while the observer nobody subscribes to
+ * would report the query as pending for good, so that result also counts.
+ * @param observer - Provider-owned Observer of the query
+ * @param passedPending - Whether the result last passed for the query read as pending
+ * @returns true if the query reads as pending
+ */
+function isRegisteredPending(
+  observer: QueryObserver,
+  passedPending: boolean | undefined,
+) {
+  return passedPending !== false && observer.getCurrentResult().isPending
+}
+
+/**
+ * Read the state of the queries a caller waits for.
  *
  * A result the caller passed decides for its own query. It is recomputed from the
  * live cache entry on every render and it is what `getQueryResult` hands back, so
@@ -277,20 +298,14 @@ function readSettledFailures(
  * one exception is a query that already failed (`readSettledFailures`): it is
  * settled, and it is thrown rather than returned.
  *
- * A provider-owned observer only reports what it saw when the query last settled:
- * it is unsubscribed as soon as its suspend Promise resolves, and a query rewound
- * in place - `resetQueries()` keeps the same Query object and only puts its state
- * back to pending - notifies nobody who is not subscribed. So its snapshot decides
- * only for the queries nobody passed this render, which is what keeps the whole
- * screen suspended together - and only while the result last passed for the query
- * read as pending too. A caller that got a result it could paint (placeholder
- * data) painted it, so its query no longer holds anyone back, while the observer
- * nobody subscribes to would report it as pending for good.
+ * The other registered queries decide through `isRegisteredPending`, and only the
+ * ones `isPeer` accepts: the queries of components coming on screen alongside the
+ * caller, which is what keeps them from painting in parts.
  * @param observers - Registered Observers, keyed by query key string
  * @param results - Query results the caller passed
  * @param failures - Passed queries that already failed
  * @param passedPending - Whether the result last passed for each query read as pending
- * @param mounted - Whether the caller is already on screen
+ * @param isPeer - Whether the caller waits for a query it did not pass
  * @returns State of every query the caller waits for
  */
 function readQueryStates(
@@ -298,14 +313,14 @@ function readQueryStates(
   results: readonly ScreenQueryResult[],
   failures: ReadonlyMap<string, QueryState>,
   passedPending: ReadonlyMap<string, boolean>,
-  mounted: boolean,
+  isPeer: (keyString: string) => boolean,
 ): RegisteredQueryState[] {
   const passed = new Map(
     results.map((result) => [getQueryKeyString(result), result]),
   )
 
   return [...observers]
-    .filter(([keyString]) => !mounted || passed.has(keyString))
+    .filter(([keyString]) => passed.has(keyString) || isPeer(keyString))
     .map(([keyString, observer]) => {
       const result = passed.get(keyString)
       return {
@@ -314,8 +329,7 @@ function readQueryStates(
           !failures.has(keyString) &&
           (result
             ? result.isPending
-            : passedPending.get(keyString) !== false &&
-              observer.getCurrentResult().isPending),
+            : isRegisteredPending(observer, passedPending.get(keyString))),
       }
     })
 }
@@ -544,7 +558,13 @@ export function ScreenQueryProvider({
         results,
         failures,
         passedPendingRef.current,
-        options?.mounted ?? false,
+        (keyString) =>
+          // A caller on screen waits only for its own queries. A mounting one waits
+          // for the queries of other components still coming on screen - not the
+          // ones painted components hold or update (a transition, a refetch)
+          !options?.mounted &&
+          !holdersRef.current.has(keyString) &&
+          !mountedKeysRef.current.has(keyString),
       )
 
       // Check loading state and throw Promise for React Suspense
@@ -575,11 +595,19 @@ export function ScreenQueryProvider({
   ) as GetQueryResult
 
   /**
-   * Refetch all registered queries
+   * Refetch the registered queries that are on screen: the ones components hold,
+   * and the ones a call without `mounted` registered. A query only a render still
+   * resolving - or one React discarded - registered is not on screen yet
    * Used for pull-to-refresh etc.
    */
   const refetchQueries = useCallback(async () => {
-    const queries = [...queriesRef.current.values()]
+    const queries = [...queriesRef.current]
+      .filter(
+        ([keyString]) =>
+          holdersRef.current.has(keyString) ||
+          directKeysRef.current.has(keyString),
+      )
+      .map(([, query]) => query)
 
     // Set custom notify function to temporarily ignore notifications
     notifyManager.setNotifyFunction(() => {})
@@ -635,24 +663,37 @@ export function ScreenQueryProvider({
   )
 
   /**
-   * Drop the queries nothing holds any more.
+   * Drop the queries nobody reads or waits for any more.
    *
-   * Besides the released ones, this sweeps the queries a caller already on screen
-   * registered without ever holding them: a deferred render (`useDeferredValue`, a
-   * transition) React discarded before it committed. Nobody waits for them - callers
-   * on screen wait only for their own queries - and a render still resolving one
-   * registers it again when it retries. The queries a mounting render registered
-   * stay until held and released, since other mounting components wait for them.
+   * A query is dropped when nothing holds it, no call without `mounted` registered
+   * it, and one of the following holds:
+   * - Its last holder released it
+   * - A caller already on screen last registered it: a deferred render
+   *   (`useDeferredValue`, a transition) React discarded, or one still resolving -
+   *   nobody else waits for it, and a render still resolving it registers it again
+   *   when it retries
+   * - It has settled: nobody waits for a settled query, and a render still resolving
+   *   it registers it again when it retries
+   *
+   * What stays is a pending query a mounting render registered, since the other
+   * mounting components wait for it.
    *
    * The Observer is not destroyed: a suspend Promise may still be subscribed to it,
    * and it detaches itself once the query settles.
    * @param released - Query keys whose last holder released them
    */
   const dropUnheldQueries = useCallback((released: readonly string[]) => {
-    for (const keyString of [...released, ...mountedKeysRef.current]) {
+    for (const [keyString, observer] of observersRef.current) {
       if (
         holdersRef.current.has(keyString) ||
         directKeysRef.current.has(keyString)
+      ) {
+        continue
+      }
+      if (
+        !released.includes(keyString) &&
+        !mountedKeysRef.current.has(keyString) &&
+        isRegisteredPending(observer, passedPendingRef.current.get(keyString))
       ) {
         continue
       }

@@ -5,7 +5,13 @@ import {
 } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type React from 'react'
-import { Suspense, useDeferredValue, useEffect, useState } from 'react'
+import {
+  Suspense,
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useState,
+} from 'react'
 import { ScreenQueryProvider } from '~/providers/ScreenQueryProvider'
 import { delay, suppressConsoleError } from '~/test-utils/screen-query'
 import { useQueryKey } from './useQueryKey'
@@ -29,9 +35,9 @@ function text() {
   return document.body.textContent ?? ''
 }
 
-async function fetchCondition(condition: string) {
+async function fetchCondition(condition: string, ms = 30) {
   fetched.push(condition)
-  await delay(10)
+  await delay(ms)
   return condition
 }
 
@@ -50,16 +56,31 @@ function List({ condition, keep }: { condition: string; keep: boolean }) {
   return `rows: ${rows}`
 }
 
-function Screen({ keep }: { keep: boolean }) {
+/** How the screen hands a new condition to the list */
+type Form =
+  | 'state'
+  | 'useDeferredValue'
+  | 'startTransition'
+  | 'keepPreviousData'
+
+function Screen({ form }: { form: Form }) {
   const [condition, setCondition] = useState('a')
   const deferred = useDeferredValue(condition)
+  const next = () => {
+    const update = () => setCondition((current) => `${current}a`)
+    if (form === 'startTransition') startTransition(update)
+    else update()
+  }
   return (
     <>
-      <button type="button" onClick={() => setCondition(`${condition}a`)}>
+      <button type="button" onClick={next}>
         next
       </button>
       <Suspense fallback={<Fallback />}>
-        <List condition={keep ? condition : deferred} keep={keep} />
+        <List
+          condition={form === 'useDeferredValue' ? deferred : condition}
+          keep={form === 'keepPreviousData'}
+        />
       </Suspense>
     </>
   )
@@ -91,46 +112,44 @@ describe('useSyncQuery with a key that changes', () => {
     queryClient.clear()
   })
 
-  describe.each([
-    { form: 'placeholderData: keepPreviousData', keep: true },
-    { form: 'useDeferredValue', keep: false },
-  ])('when the previous data is kept with $form', ({ keep }) => {
-    it('should keep the previous data on screen every time the key changes', async () => {
+  describe.each<{ form: Form; keeps: boolean }>([
+    { form: 'useDeferredValue', keeps: true },
+    { form: 'startTransition', keeps: true },
+    { form: 'keepPreviousData', keeps: true },
+    { form: 'state', keeps: false },
+  ])('when the condition reaches the list through $form', ({ form, keeps }) => {
+    it.each([
+      { changes: 'one at a time', settle: true },
+      { changes: 'before the previous one loads', settle: false },
+    ])('should read only the latest key when it changes $changes', async ({
+      settle,
+    }) => {
       // Given: The first list is on screen
-      render(tree(<Screen keep={keep} />))
+      render(tree(<Screen form={form} />))
       await waitFor(() => expect(text()).toContain('rows: a'))
       expect(fallbacks).toBe(1)
 
-      for (const next of ['aa', 'aaa', 'aaaa', 'aaaaa']) {
-        // When: The condition changes again
-        await act(async () => {
-          fireEvent.click(screen.getByText('next'))
-        })
-
-        // Then: The list moves to the new key without falling back to loading
-        await waitFor(() => expect(text()).toContain(`rows: ${next}`))
-      }
-      expect(fallbacks).toBe(1)
-    })
-
-    it('should refetch only the key the list reads now', async () => {
-      // Given: The condition changed twice after the first list
-      render(tree(<Screen keep={keep} />))
-      await waitFor(() => expect(text()).toContain('rows: a'))
+      // When: The condition changes twice
       for (const next of ['aa', 'aaa']) {
         await act(async () => {
           fireEvent.click(screen.getByText('next'))
         })
-        await waitFor(() => expect(text()).toContain(`rows: ${next}`))
+        if (settle)
+          await waitFor(() => expect(text()).toContain(`rows: ${next}`))
       }
-      fetched.length = 0
+      await waitFor(() => expect(text()).toContain('rows: aaa'))
+      await act(async () => {})
 
-      // When: Every registered query is refetched
+      // Then: A form that keeps the previous list never falls back to loading,
+      // while a plain state change does, as a suspense query would
+      if (keeps) expect(fallbacks).toBe(1)
+      else expect(fallbacks).toBeGreaterThan(1)
+
+      // Then: Refetching fetches only the key the list reads now
+      fetched.length = 0
       await act(async () => {
         await refetch()
       })
-
-      // Then: The keys the list moved away from are not fetched again
       expect(fetched).toEqual(['aaa'])
     })
   })
@@ -167,30 +186,6 @@ describe('useSyncQuery with a key that changes', () => {
 
     // Then: Only the component still on screen has its query fetched again
     expect(fetched).toEqual(['a'])
-  })
-
-  it('should stop refetching a key a discarded deferred render registered', async () => {
-    // Given: The condition changes twice before the first change has loaded, so
-    // React discards the deferred render of the middle key
-    render(tree(<Screen keep={false} />))
-    await waitFor(() => expect(text()).toContain('rows: a'))
-    await act(async () => {
-      fireEvent.click(screen.getByText('next'))
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByText('next'))
-    })
-    await waitFor(() => expect(text()).toContain('rows: aaa'))
-    await act(async () => {})
-    fetched.length = 0
-
-    // When: Every registered query is refetched
-    await act(async () => {
-      await refetch()
-    })
-
-    // Then: Only the key the list reads now is fetched again
-    expect(fetched).toEqual(['aaa'])
   })
 
   it('should keep a key a direct getQueryResult call reads after useSyncQuery releases it', async () => {
@@ -280,7 +275,7 @@ describe('useSyncQuery with a key that changes', () => {
       tree(
         <>
           <Holder />
-          <Screen keep={false} />
+          <Screen form="useDeferredValue" />
         </>,
       ),
     )
@@ -300,37 +295,128 @@ describe('useSyncQuery with a key that changes', () => {
     expect(fetched).toEqual(['a'])
   })
 
-  it('should still wait for a key another component is loading', async () => {
-    // Given: One component reads a slow query next to one that resolves at once
-    function Slow() {
-      return `slow: ${useSyncQuery(
-        useQueryKey({
-          queryKey: ['slow'],
-          queryFn: async () => {
-            await delay(50)
-            return 'done'
-          },
-        }),
-      )}`
-    }
-    function Fast() {
-      return `fast: ${useSyncQuery(useQueryKey({ queryKey: ['fast'], queryFn: async () => 'done' }))}`
+  it('should paint components mounting together at once, even under separate boundaries', async () => {
+    // Given: Two components mount together under their own boundaries, one of them
+    // reading a slower query
+    function Item({ id, ms }: { id: string; ms: number }) {
+      return `${id}: ${useSyncQuery(useQueryKey({ queryKey: [id], queryFn: () => fetchCondition(id, ms) }))} `
     }
 
-    // When: Both mount under the same boundary
+    // When: They mount
     render(
       tree(
-        <Suspense fallback={<Fallback />}>
-          <Fast />
-          <Slow />
-        </Suspense>,
+        <>
+          <Suspense fallback={<Fallback />}>
+            <Item id="fast" ms={0} />
+          </Suspense>
+          <Suspense fallback={<Fallback />}>
+            <Item id="slow" ms={60} />
+          </Suspense>
+        </>,
       ),
     )
+    await delay(30)
+
+    // Then: The faster one waits for the slower one
+    expect(text()).not.toContain('fast: fast')
+    await waitFor(() => expect(text()).toContain('slow: slow'))
+    expect(text()).toContain('fast: fast')
+  })
+
+  it('should not hold a mounting component back for a key a painted component moves to', async () => {
+    // Given: The list is on screen, and moves to a slow key in a transition
+    function Other() {
+      return `other: ${useSyncQuery(useQueryKey({ queryKey: ['other'], queryFn: () => fetchCondition('other', 0) }))}`
+    }
+    function Page() {
+      const [condition, setCondition] = useState('a')
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => startTransition(() => setCondition('slow'))}
+          >
+            next
+          </button>
+          <button type="button" onClick={() => setOpen(true)}>
+            open
+          </button>
+          <Suspense fallback={<Fallback />}>
+            <List condition={condition} keep={false} />
+          </Suspense>
+          <Suspense fallback={<Fallback />}>{open && <Other />}</Suspense>
+        </>
+      )
+    }
+    render(tree(<Page />))
+    await waitFor(() => expect(text()).toContain('rows: a'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('next'))
+    })
+
+    // When: Another component mounts while the transition is loading
+    await act(async () => {
+      fireEvent.click(screen.getByText('open'))
+    })
+
+    // Then: It paints without waiting for the transition's key
+    await waitFor(() => expect(text()).toContain('other: other'))
+    expect(text()).toContain('rows: a')
+  })
+
+  it('should keep waiting for a component still loading when a release sweeps the registration', async () => {
+    // Given: A slow component is still loading when the list on screen moves to
+    // another key, which releases the old one and sweeps the registration
+    function Item({ id, ms }: { id: string; ms: number }) {
+      return `${id}: ${useSyncQuery(useQueryKey({ queryKey: [id], queryFn: () => fetchCondition(id, ms) }))} `
+    }
+    function Page() {
+      const [condition, setCondition] = useState('a')
+      const [slow, setSlow] = useState(false)
+      const [fast, setFast] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setCondition('b')}>
+            next
+          </button>
+          <button type="button" onClick={() => setSlow(true)}>
+            slow
+          </button>
+          <button type="button" onClick={() => setFast(true)}>
+            fast
+          </button>
+          <Suspense fallback={<Fallback />}>
+            <List condition={condition} keep />
+          </Suspense>
+          <Suspense fallback={<Fallback />}>
+            {slow && <Item id="slow" ms={80} />}
+          </Suspense>
+          <Suspense fallback={<Fallback />}>
+            {fast && <Item id="fast" ms={0} />}
+          </Suspense>
+        </>
+      )
+    }
+    render(tree(<Page />))
+    await waitFor(() => expect(text()).toContain('rows: a'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('slow'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByText('next'))
+    })
+    await waitFor(() => expect(text()).toContain('rows: b'))
+
+    // When: Another component mounts while the slow one is still loading
+    await act(async () => {
+      fireEvent.click(screen.getByText('fast'))
+    })
     await delay(20)
 
-    // Then: Nothing paints until the slow query settles too
-    expect(text()).not.toContain('fast: done')
-    await waitFor(() => expect(text()).toContain('slow: done'))
-    expect(text()).toContain('fast: done')
+    // Then: It still waits for the slow one
+    expect(text()).not.toContain('fast: fast')
+    await waitFor(() => expect(text()).toContain('slow: slow'))
+    await waitFor(() => expect(text()).toContain('fast: fast'))
   })
 })

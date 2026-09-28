@@ -161,15 +161,24 @@ state instead would gate a screen on queries no live screen holds: a query the
 previous screen left behind would have to be fetched again before the current screen
 could paint.
 
-Two conditions narrow which of those queries a caller waits for:
+Which of those queries a caller waits for depends on whether it is on screen yet:
 
-| Condition | Why |
-| --- | --- |
-| The caller is not on screen yet (`mounted` is false) | Components that paint together are the ones mounting together. A component already on screen that waited for the queries of components still resolving would take down what it has painted - a query registered by a deferred render (`useDeferredValue`, a transition) would put the screen it is meant to keep back to its fallback |
-| The result last passed for the query read as pending too | A caller that got a result it could paint - placeholder data (`placeholderData: keepPreviousData`) while the query itself is pending - has painted it, so the query holds nobody back. Its observer, created while the query was pending and subscribed by no promise, would report it as pending for good |
+| Caller | Waits for the queries it did not pass | Why |
+| --- | --- | --- |
+| Already on screen (`mounted` is true) | None | A component already painted that waited for others would take down what it painted. A query registered by its own deferred render (`useDeferredValue`, a transition) would put the screen it is meant to keep back to its fallback |
+| Still coming on screen | The ones other mounting renders registered | Components that paint together are the ones mounting together. The queries painted components hold, or register while they update (a transition, a refetch), are theirs to wait for |
 
-Both only narrow the decision: a query the snapshot reports as settled is never
-waited for.
+And a query counts as pending only while the result last passed for it read as
+pending too. A caller that got a result it could paint - placeholder data
+(`placeholderData: keepPreviousData`) while the query itself is pending - has painted
+it, so the query holds nobody back. Its observer, created while the query was
+pending and subscribed by no promise, would report it as pending for good.
+
+These only narrow the decision: a query the snapshot reports as settled is never
+waited for. So how a component keeps its previous data while a key changes -
+`useDeferredValue`, `startTransition` or `keepPreviousData` - does not change what
+it or anyone else waits for; a plain state change suspends on its own new key, as a
+suspense query would.
 
 The suspend promise then waits on exactly the queries that decision found pending
 (`createObserverPromise`). Waiting on a query the decision considered settled would
@@ -178,25 +187,32 @@ through renders until the query happens to settle on its own.
 
 ### Registration Lifetime
 
-A query stays registered while a component on screen holds it (`retainQueries`). When
-the last holder releases it - the component moved to another key or unmounted - it
-leaves the registration, so neither `refetchQueries` nor the suspend decision includes
-it any more. The release takes effect once the commit has settled (a microtask):
-StrictMode, and a key that moves from one component to another, release and hold it
-again within the same commit.
+A query stays registered while a component on screen holds it (`retainQueries`), and
+`refetchQueries` fetches only those, plus the ones a call without `mounted` (a direct
+`getQueryResult` call) registered. A query that only a render still coming on
+screen - or one React discarded - registered is not on screen, so it is not
+refetched.
 
-The same sweep drops the queries a caller already on screen registered without
-ever holding them: a deferred render (`useDeferredValue`, a transition) React
-discarded before it committed. Nobody waits for them, since callers on screen wait
-only for their own queries, and a render still resolving one registers it again
-when it retries.
+Queries leave the registration once a release has settled (a microtask: StrictMode,
+and a key that moves from one component to another, release and hold it again within
+the same commit). A query nothing holds and no direct call registered is dropped
+when:
 
-Two kinds of queries stay registered until the provider unmounts:
+- its last holder released it (the component moved to another key or unmounted),
+- a caller already on screen last registered it - a deferred render, discarded or
+  still resolving, that nobody else waits for, or
+- it has settled - nobody waits for a settled query.
 
-| Query | Why |
-| --- | --- |
-| Registered by a call that omits `mounted` (a direct `getQueryResult` call) | Nothing holds it, so nothing can tell when its reader is gone |
-| Registered by a mounting render React discarded | Other mounting components wait for the queries a mounting render registered, and a discarded one cannot be told apart from one still resolving |
+A render still resolving a dropped query registers it again when it retries.
+
+**A pending query a discarded mounting render registered stays until it settles**,
+and components mounting in the meantime wait for it: nothing tells a discarded render
+from one still resolving, and the mounting components alongside the latter must wait
+for it. Switching a keyed boundary while its first load is in flight therefore makes
+the new content wait for the old request whenever that request is the slower one
+(an old request of 150ms and a new one of 30ms, switched at 36ms: the new content
+resolves at 157ms instead of 66ms). A `ScreenQueryProvider` inside the keyed boundary
+scopes the registration to the key, so the old request goes with it.
 
 The observer of a dropped query is not destroyed, because a suspend promise may
 still be subscribed to it; it detaches from the query once the query settles.

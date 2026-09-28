@@ -180,7 +180,7 @@ Synchronously get results from multiple queries.
   - `options` - Optional configuration
     - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
     - `errorResetBoundary` - The `QueryErrorResetBoundary` the caller renders under (`useQueryErrorResetBoundary()`). While it is reset, a failed query is fetched again instead of thrown - see [Error Recovery](#error-recovery)
-    - `mounted` - Whether the caller is already on screen (default: `false`). While true, only the queries passed in this call are waited for
+    - `mounted` - Whether the caller is already on screen (default: `false`). While true, only the queries passed in this call are waited for; while false, also the ones other mounting callers registered
 - **Returns**: Array of query data in the same order as input
 - **Throws**:
   - `Promise` during loading state (handled by Suspense)
@@ -204,9 +204,9 @@ const [userData, postsData] = getQueryResult(
 
 #### `refetchQueries()`
 
-Refetch all registered queries with batched notifications to prevent partial updates.
-A query `useSyncQuery` read leaves the registration once no component on screen reads
-it (see `retainQueries`).
+Refetch the registered queries that are on screen with batched notifications to
+prevent partial updates: the ones components hold (see `retainQueries`) and the ones
+direct `getQueryResult` calls registered.
 
 ```tsx
 await refetchQueries() // Useful for pull-to-refresh
