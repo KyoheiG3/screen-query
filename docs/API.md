@@ -252,14 +252,14 @@ clearCache: (status: ClearCacheStatus) => Promise<void>
 
 Function that holds queries in the registration while a component on screen reads them,
 and returns the function that releases them. `useSyncQuery` calls it; call it yourself
-only alongside a direct `getQueryResult` call. A query nothing holds any more leaves the
-registration once the release has settled, so `refetchQueries` no longer fetches it.
-Queries that were never held stay registered.
+only alongside a `getQueryResult` call that passes `mounted`. A query nothing holds any
+more leaves the registration once the release has settled, so `refetchQueries` no
+longer fetches it. A query a call without `mounted` registered stays registered.
 
 ```typescript
 const { getQueryResult, retainQueries } = useScreenQueryContext()
 
-const [user] = getQueryResult([userQuery])
+const [user] = getQueryResult([userQuery], { mounted })
 useEffect(() => retainQueries([{ queryKey: userQuery.queryKey }]), [retainQueries])
 ```
 

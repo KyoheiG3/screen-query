@@ -2,7 +2,7 @@ import {
   type QueryKey,
   useQueryErrorResetBoundary,
 } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ScreenQueryResult } from '~/providers/ScreenQueryProvider'
 import { useScreenQueryContext } from './useScreenQueryContext'
 
@@ -71,8 +71,10 @@ export function useSyncQuery(
     [retainQueries, queryKeys],
   )
 
+  // Set before passive effects, so a re-render a layout effect schedules right
+  // after the first commit already counts as on screen
   const mounted = useRef(false)
-  useEffect(() => {
+  useLayoutEffect(() => {
     mounted.current = true
   }, [])
 

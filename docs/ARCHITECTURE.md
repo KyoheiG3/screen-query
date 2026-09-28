@@ -185,11 +185,21 @@ it any more. The release takes effect once the commit has settled (a microtask):
 StrictMode, and a key that moves from one component to another, release and hold it
 again within the same commit.
 
-Queries that were never held stay registered, as they always have: those passed by
-direct `getQueryResult` calls, and those of a render React discarded before it
-committed. The observer of a released query is not destroyed, because a suspend
-promise may still be subscribed to it; it detaches from the query once the query
-settles.
+The same sweep drops the queries a caller already on screen registered without
+ever holding them: a deferred render (`useDeferredValue`, a transition) React
+discarded before it committed. Nobody waits for them, since callers on screen wait
+only for their own queries, and a render still resolving one registers it again
+when it retries.
+
+Two kinds of queries stay registered until the provider unmounts:
+
+| Query | Why |
+| --- | --- |
+| Registered by a call that omits `mounted` (a direct `getQueryResult` call) | Nothing holds it, so nothing can tell when its reader is gone |
+| Registered by a mounting render React discarded | Other mounting components wait for the queries a mounting render registered, and a discarded one cannot be told apart from one still resolving |
+
+The observer of a dropped query is not destroyed, because a suspend promise may
+still be subscribed to it; it detaches from the query once the query settles.
 
 ### Observer Lifecycle
 

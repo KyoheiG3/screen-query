@@ -169,6 +169,72 @@ describe('useSyncQuery with a key that changes', () => {
     expect(fetched).toEqual(['a'])
   })
 
+  it('should stop refetching a key a discarded deferred render registered', async () => {
+    // Given: The condition changes twice before the first change has loaded, so
+    // React discards the deferred render of the middle key
+    render(tree(<Screen keep={false} />))
+    await waitFor(() => expect(text()).toContain('rows: a'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('next'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByText('next'))
+    })
+    await waitFor(() => expect(text()).toContain('rows: aaa'))
+    await act(async () => {})
+    fetched.length = 0
+
+    // When: Every registered query is refetched
+    await act(async () => {
+      await refetch()
+    })
+
+    // Then: Only the key the list reads now is fetched again
+    expect(fetched).toEqual(['aaa'])
+  })
+
+  it('should keep a key a direct getQueryResult call reads after useSyncQuery releases it', async () => {
+    // Given: One component reads a key through getQueryResult, and another reads
+    // the same key through useSyncQuery and then leaves
+    function Direct() {
+      const context = useScreenQueryContext()
+      const [rows] = context.getQueryResult([
+        useQueryKey({
+          queryKey: ['list', 'a'],
+          queryFn: () => fetchCondition('a'),
+        }),
+      ])
+      return `direct: ${rows}`
+    }
+    function Page() {
+      const [open, setOpen] = useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(false)}>
+            close
+          </button>
+          <Suspense fallback={<Fallback />}>
+            <Direct />
+            {open && <List condition="a" keep={false} />}
+          </Suspense>
+        </>
+      )
+    }
+    render(tree(<Page />))
+    await waitFor(() => expect(text()).toContain('rows: a'))
+    fireEvent.click(screen.getByText('close'))
+    await act(async () => {})
+    fetched.length = 0
+
+    // When: Every registered query is refetched
+    await act(async () => {
+      await refetch()
+    })
+
+    // Then: The key the direct caller still reads is fetched again
+    expect(fetched).toEqual(['a'])
+  })
+
   it('should keep refetching a key another component still reads', async () => {
     // Given: Two components read the same key, then one of them leaves
     function Page() {
