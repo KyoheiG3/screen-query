@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.2.0
+
+### Features
+
+- **`retainQueries(queryKeys)`** on the context. It holds queries in the
+  registration while a component on screen reads them, and returns the function that
+  releases them. `useSyncQuery` calls it from an effect with the keys it reads.
+- **`mounted` option on `getQueryResult`** — whether the caller is already on screen.
+  `useSyncQuery` passes it from a ref set in a layout effect on the first commit.
+  Passing it also hands the queries' registration to `retainQueries`.
+
+### Behavior changes
+
+- **Who waits for what now depends only on whether a caller is on screen.**
+  - A caller already on screen waits only for the queries it passes. A painted
+    component no longer falls back to loading because another component is loading.
+  - A caller still coming on screen also waits for the queries other mounting renders
+    registered. It does not wait for the ones painted components hold or update.
+  - An unpassed query counts as pending only if the result last passed for it did
+    too. A caller that got placeholder data has painted it, so its query holds
+    nobody back.
+- **`refetchQueries` fetches only the queries on screen**: the held ones, plus the
+  ones direct `getQueryResult` calls (without `mounted`) registered.
+- **Queries nothing holds leave the registration** once a release has settled (a
+  microtask). A query leaves if its last holder released it, if a caller on screen
+  registered it without holding it, or once it has settled. Queries registered by
+  direct calls stay, as before.
+- **Suspend promises are shared by the set of queries waited for**, not the set
+  passed.
+- **`suspendOnCreate` suspends only on a key's first observer** since the provider
+  mounted or `clearCache` ran, so returning to a cached key does not suspend again.
+- `ScreenQueryContextValue` has a new member, `retainQueries`. A context value built
+  by hand has to provide it.
+
+### Fixes
+
+- **A list whose key follows a condition keeps its previous data on screen.** This
+  covers a search term or a filter, kept with `placeholderData: keepPreviousData` or
+  `useDeferredValue`. Before, it fell back to loading on changes after the first. A
+  key registered with paintable placeholder data got an observer nobody subscribed
+  to, which reported it as pending for good. With `useDeferredValue`, a re-render of
+  the painted list waited for the key the deferred render had just registered.
+- **`refetchQueries` no longer refetches keys nobody reads any more.**
+- **A `gcTime: 0` query read through `useSyncQuery` is no longer collected** between
+  settling and the retried render committing. It used to be fetched a second time,
+  with the "cache entry was replaced" warning. The provider now keeps the query
+  observed until the component holds it. Direct `getQueryResult` calls are unchanged.
+- The "cache entry was replaced" warning says which callers its `gcTime` advice is
+  for.
+
+### Known limits
+
+- A pending query registered by a mounting render that React discarded stays until it
+  settles, and components mounting meanwhile wait for it. For example, switching a
+  keyed boundary during its first load can make the new content wait for the old
+  request, if that request is the slower one. A `ScreenQueryProvider` inside the keyed
+  boundary avoids it.
+
 ## 0.1.0
 
 ### Features
