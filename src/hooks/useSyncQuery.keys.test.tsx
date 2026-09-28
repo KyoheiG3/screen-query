@@ -48,7 +48,8 @@ function List({ condition, keep }: { condition: string; keep: boolean }) {
   const rows = useSyncQuery(
     useQueryKey({
       queryKey: ['list', condition],
-      queryFn: () => fetchCondition(condition),
+      // 'slow' stands for a request that outlasts the assertions made meanwhile
+      queryFn: () => fetchCondition(condition, condition === 'slow' ? 300 : 30),
       placeholderData: keep ? keepPreviousData : undefined,
     }),
   )
@@ -418,5 +419,60 @@ describe('useSyncQuery with a key that changes', () => {
     expect(text()).not.toContain('fast: fast')
     await waitFor(() => expect(text()).toContain('slow: slow'))
     await waitFor(() => expect(text()).toContain('fast: fast'))
+  })
+
+  it('should not hand a caller on screen the promise a mounting caller waits on for the same key', async () => {
+    // Given: Two components mount together - one reads K, the other a slow query -
+    // and a list already on screen moves to K with a plain state change
+    const resolvedAt: Record<string, number> = {}
+    function Timed({ id, ms, name }: { id: string; ms: number; name: string }) {
+      const value = useSyncQuery(
+        useQueryKey({ queryKey: [id], queryFn: () => fetchCondition(id, ms) }),
+      )
+      resolvedAt[name] ??= performance.now()
+      return `${name}: ${value} `
+    }
+    function Page() {
+      const [id, setId] = useState('x')
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            open
+          </button>
+          <button type="button" onClick={() => setId('k')}>
+            next
+          </button>
+          <Suspense fallback={<Fallback />}>
+            <Timed id={id} ms={30} name={`painted-${id}`} />
+          </Suspense>
+          <Suspense fallback={<Fallback />}>
+            {open && <Timed id="peer" ms={200} name="peer" />}
+          </Suspense>
+          <Suspense fallback={<Fallback />}>
+            {open && <Timed id="k" ms={30} name="mounting" />}
+          </Suspense>
+        </>
+      )
+    }
+    render(tree(<Page />))
+    await waitFor(() => expect(text()).toContain('painted-x: x'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('open'))
+    })
+    // The mounting components have suspended on their promises
+    await delay(5)
+
+    // When: The list on screen moves to K
+    const switchedAt = performance.now()
+    await act(async () => {
+      fireEvent.click(screen.getByText('next'))
+    })
+    await waitFor(() => expect(resolvedAt['painted-k']).toBeDefined())
+
+    // Then: It resolves with K, without waiting for the slow query the mounting
+    // components wait for
+    expect(resolvedAt['painted-k'] - switchedAt).toBeLessThan(150)
+    expect(resolvedAt.peer).toBeUndefined()
   })
 })

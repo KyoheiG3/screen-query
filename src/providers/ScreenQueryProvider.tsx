@@ -226,6 +226,7 @@ function warnDetachedQuery(
  * wait on to learn that it settled.
  */
 type RegisteredQueryState = {
+  keyString: string
   observer: QueryObserver
   isPending: boolean
 }
@@ -324,6 +325,7 @@ function readQueryStates(
     .map(([keyString, observer]) => {
       const result = passed.get(keyString)
       return {
+        keyString,
         observer,
         isPending:
           !failures.has(keyString) &&
@@ -344,13 +346,18 @@ function getQueryKeyString(query: ScreenQuery) {
 }
 
 /**
- * Generate unique set key from multiple queries
- * Used as identifier for Promise management
- * @param queries - Array of queries
+ * Generate unique set key from the queries a suspend Promise waits for.
+ * Used as identifier for Promise management: callers that pass the same queries
+ * can still wait for different ones (a mounting caller also waits for its peers),
+ * so the key is taken from what is waited for, not from what was passed
+ * @param states - State of every query the caller waits for
  * @returns Sorted pipe-delimited string
  */
-function generateQuerySetKey(queries: readonly ScreenQuery[]) {
-  return queries.map(getQueryKeyString).sort().join('|')
+function generateQuerySetKey(states: readonly RegisteredQueryState[]) {
+  return states
+    .map((state) => state.keyString)
+    .sort()
+    .join('|')
 }
 
 /**
@@ -489,20 +496,18 @@ export function ScreenQueryProvider({
   )
 
   /**
-   * Create or get Promise that waits for every registered query to settle
+   * Create or get Promise that waits for every query the caller waits for to settle
    * Reuses existing Promise for the same query set
-   * @param states - State of every registered query
-   * @param queries - Corresponding query array (for key generation)
+   * @param states - State of every query the caller waits for
    * @param errorResetBoundary - QueryErrorResetBoundary to clear when a query fails
    * @returns Promise that waits for all pending queries to settle
    */
   const createCombinedPromise = useCallback(
     (
       states: readonly RegisteredQueryState[],
-      queries: readonly ScreenQuery[],
       errorResetBoundary?: ErrorResetBoundary,
     ) => {
-      const querySetKey = generateQuerySetKey(queries)
+      const querySetKey = generateQuerySetKey(states)
 
       // Check for existing Promise for the same query set
       const existingPromise = queryPromiseRef.current.get(querySetKey)
@@ -575,7 +580,7 @@ export function ScreenQueryProvider({
         // React Suspense pattern: Throwing a Promise is the correct way to trigger Suspense.
         // When React catches this Promise, it will show the fallback UI and re-render when resolved.
         // This ensures all queries complete before rendering, preventing partial UI updates.
-        throw createCombinedPromise(queryStates, results, errorResetBoundary)
+        throw createCombinedPromise(queryStates, errorResetBoundary)
       }
 
       // Check for errors and throw for React ErrorBoundary
@@ -683,7 +688,9 @@ export function ScreenQueryProvider({
    * @param released - Query keys whose last holder released them
    */
   const dropUnheldQueries = useCallback((released: readonly string[]) => {
-    for (const [keyString, observer] of observersRef.current) {
+    // Walked from the queries, not the Observers: `clearCache` empties the latter
+    for (const keyString of queriesRef.current.keys()) {
+      const observer = observersRef.current.get(keyString)
       if (
         holdersRef.current.has(keyString) ||
         directKeysRef.current.has(keyString)
@@ -693,6 +700,7 @@ export function ScreenQueryProvider({
       if (
         !released.includes(keyString) &&
         !mountedKeysRef.current.has(keyString) &&
+        observer &&
         isRegisteredPending(observer, passedPendingRef.current.get(keyString))
       ) {
         continue

@@ -299,7 +299,7 @@ sequenceDiagram
 Internal state uses Map for high-performance lookups with constant time complexity.
 
 ### Promise Deduplication
-Identical query sets share the same Promise, reducing memory allocation and preventing duplicate network requests.
+Callers waiting for the same set of queries share the same Promise, reducing memory allocation and preventing duplicate network requests. The set is what a caller waits for, not what it passed: a mounting caller also waits for its peers.
 
 ### Notification Batching
 Controls React Query's notification system to batch UI updates, preventing partial updates and reducing render count.
