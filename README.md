@@ -146,7 +146,10 @@ Reads one query result, or an array of them, synchronously inside a component: l
 suspends, a failure without data is thrown to the ErrorBoundary, and only the data comes
 back. It passes the `QueryErrorResetBoundary` the component renders under to
 `getQueryResult`, so an ErrorBoundary reset retries failed queries - see
-[Error Recovery](#error-recovery).
+[Error Recovery](#error-recovery). It holds the queries it reads while the component is
+on screen, and once on screen it waits only for its own queries, so a key that follows a
+condition can keep the previous data with `placeholderData: keepPreviousData` or
+`useDeferredValue`.
 
 ```tsx
 import { useQueryKey, useSyncQuery } from 'screen-query'
@@ -177,6 +180,7 @@ Synchronously get results from multiple queries.
   - `options` - Optional configuration
     - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
     - `errorResetBoundary` - The `QueryErrorResetBoundary` the caller renders under (`useQueryErrorResetBoundary()`). While it is reset, a failed query is fetched again instead of thrown - see [Error Recovery](#error-recovery)
+    - `mounted` - Whether the caller is already on screen (default: `false`). While true, only the queries passed in this call are waited for
 - **Returns**: Array of query data in the same order as input
 - **Throws**:
   - `Promise` during loading state (handled by Suspense)
@@ -201,6 +205,8 @@ const [userData, postsData] = getQueryResult(
 #### `refetchQueries()`
 
 Refetch all registered queries with batched notifications to prevent partial updates.
+A query `useSyncQuery` read leaves the registration once no component on screen reads
+it (see `retainQueries`).
 
 ```tsx
 await refetchQueries() // Useful for pull-to-refresh
@@ -217,6 +223,15 @@ Clear query cache and reset observers.
 ```tsx
 await clearCache('error') // Clear failed queries
 await clearCache('all')   // Clear everything
+```
+
+#### `retainQueries(queries)`
+
+Hold queries in the registration while a component on screen reads them; returns the
+function that releases them. `useSyncQuery` calls it for you.
+
+```tsx
+useEffect(() => retainQueries([{ queryKey: userQuery.queryKey }]), [retainQueries])
 ```
 
 ## Advanced Patterns

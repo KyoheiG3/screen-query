@@ -7,7 +7,8 @@
 Hook to access ScreenQueryProvider context and retrieve query management functions.
 
 ```typescript
-const { getQueryResult, refetchQueries, clearCache } = useScreenQueryContext()
+const { getQueryResult, refetchQueries, clearCache, retainQueries } =
+  useScreenQueryContext()
 ```
 
 ### useSyncQuery
@@ -17,6 +18,12 @@ a failure without data is thrown to the ErrorBoundary, and only the data comes b
 passes the `QueryErrorResetBoundary` the component renders under to `getQueryResult`
 (`errorResetBoundary`), so an ErrorBoundary reset with `onReset={reset}` fetches failed
 queries again without `clearCache`.
+
+It holds the queries it reads while the component is on screen (`retainQueries`), so
+the keys a component moves away from - a search condition that changed - leave the
+registration. Once the component is on screen, it waits only for the queries it passes
+(`mounted`), so keeping the previous data with `placeholderData: keepPreviousData` or
+`useDeferredValue` keeps it on screen while the next key loads.
 
 ```typescript
 // Single result
@@ -165,9 +172,10 @@ const [repos, user] = getQueryResult(
 - `options` - Optional configuration
   - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
   - `errorResetBoundary` - The `QueryErrorResetBoundary` the caller renders under (`useQueryErrorResetBoundary()`). While it is reset, a failed query is fetched again instead of thrown; without it, only `clearCache` retries a failed query
+  - `mounted` - Whether the caller is already on screen (default: `false`). While true, only the queries passed in this call are waited for
 
 **Behavior**:
-- Any query registered on the screen is loading → Throws Promise (caught by Suspense)
+- Any query registered on the screen is loading → Throws Promise (caught by Suspense). A query whose last passed result could be painted (placeholder data) is not waited for by other callers, and a caller already on screen waits only for its own queries
 - Observer created with `suspendOnCreate: true` → Throws Promise (caught by Suspense)
 - Query has error → Throws Error (caught by ErrorBoundary), until `clearCache` or a reset `errorResetBoundary` asks for it again
 - Query succeeds → Returns array of data
@@ -180,6 +188,7 @@ type GetQueryResult = {
     options?: {
       suspendOnCreate?: boolean
       errorResetBoundary?: ErrorResetBoundary
+      mounted?: boolean
     },
   ): {
     [K in keyof T]: T[K] extends ScreenQueryResult<infer D> ? D : never
@@ -237,6 +246,26 @@ await clearCache('all')
 **Type Signature**:
 ```typescript
 clearCache: (status: ClearCacheStatus) => Promise<void>
+```
+
+### retainQueries
+
+Function that holds queries in the registration while a component on screen reads them,
+and returns the function that releases them. `useSyncQuery` calls it; call it yourself
+only alongside a direct `getQueryResult` call. A query nothing holds any more leaves the
+registration once the release has settled, so `refetchQueries` no longer fetches it.
+Queries that were never held stay registered.
+
+```typescript
+const { getQueryResult, retainQueries } = useScreenQueryContext()
+
+const [user] = getQueryResult([userQuery])
+useEffect(() => retainQueries([{ queryKey: userQuery.queryKey }]), [retainQueries])
+```
+
+**Type Signature**:
+```typescript
+retainQueries: (queries: readonly ScreenQuery[]) => () => void
 ```
 
 ## Type Definitions

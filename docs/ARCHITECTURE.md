@@ -58,6 +58,12 @@ const warnedRef = useRef<Set<string>>(new Set())
 
 // Manages asynchronous Promise handling
 const queryPromiseRef = useRef<Map<string, Promise<void>>>(new Map())
+
+// Whether the result last passed for each query read as pending
+const passedPendingRef = useRef<Map<string, boolean>>(new Map())
+
+// How many components on screen hold each query (`retainQueries`)
+const holdersRef = useRef<Map<string, number>>(new Map())
 ```
 
 ### Main Functions
@@ -68,7 +74,11 @@ Retrieves results for specified queries, throwing Promise during loading, Error 
 ```typescript
 const getQueryResult = (
   results: readonly ScreenQueryResult[],
-  options?: { suspendOnCreate?: boolean }
+  options?: {
+    suspendOnCreate?: boolean
+    errorResetBoundary?: ErrorResetBoundary
+    mounted?: boolean
+  }
 ) => {
   // Register or retrieve Observer
   // Check loading state or suspendOnCreate option
@@ -78,6 +88,8 @@ const getQueryResult = (
 
 **Options**:
 - `suspendOnCreate` - If true, throws Promise when observer is first created (default: `false`)
+- `errorResetBoundary` - The `QueryErrorResetBoundary` the caller renders under
+- `mounted` - Whether the caller is already on screen (default: `false`). `useSyncQuery` passes it
 
 #### 2. refetchQueries
 Refetches all registered queries. Controls notifications to achieve batch updates.
@@ -99,6 +111,13 @@ const refetchQueries = async () => {
 
 #### 3. clearCache
 Clears cache for error state queries or all queries.
+
+#### 4. retainQueries
+Holds queries in the registration while a component on screen reads them, and returns
+the function that releases them. `useSyncQuery` holds the queries it reads from an
+effect, so a query stays registered from the render that first passes it until the
+last component reading it moves to another key or unmounts. See
+[Registration Lifetime](#registration-lifetime).
 
 ### Where the Suspend Decision Comes From
 
@@ -142,16 +161,41 @@ state instead would gate a screen on queries no live screen holds: a query the
 previous screen left behind would have to be fetched again before the current screen
 could paint.
 
+Two conditions narrow which of those queries a caller waits for:
+
+| Condition | Why |
+| --- | --- |
+| The caller is not on screen yet (`mounted` is false) | Components that paint together are the ones mounting together. A component already on screen that waited for the queries of components still resolving would take down what it has painted - a query registered by a deferred render (`useDeferredValue`, a transition) would put the screen it is meant to keep back to its fallback |
+| The result last passed for the query read as pending too | A caller that got a result it could paint - placeholder data (`placeholderData: keepPreviousData`) while the query itself is pending - has painted it, so the query holds nobody back. Its observer, created while the query was pending and subscribed by no promise, would report it as pending for good |
+
+Both only narrow the decision: a query the snapshot reports as settled is never
+waited for.
+
 The suspend promise then waits on exactly the queries that decision found pending
 (`createObserverPromise`). Waiting on a query the decision considered settled would
 resolve the promise at once and suspend again on the retried render, spinning
 through renders until the query happens to settle on its own.
 
+### Registration Lifetime
+
+A query stays registered while a component on screen holds it (`retainQueries`). When
+the last holder releases it - the component moved to another key or unmounted - it
+leaves the registration, so neither `refetchQueries` nor the suspend decision includes
+it any more. The release takes effect once the commit has settled (a microtask):
+StrictMode, and a key that moves from one component to another, release and hold it
+again within the same commit.
+
+Queries that were never held stay registered, as they always have: those passed by
+direct `getQueryResult` calls, and those of a render React discarded before it
+committed. The observer of a released query is not destroyed, because a suspend
+promise may still be subscribed to it; it detaches from the query once the query
+settles.
+
 ### Observer Lifecycle
 
-Provider-owned observers live in `observersRef` until `clearCache` or provider
-unmount destroys them, but they are only **subscribed** while a suspend promise is
-waiting on them. That asymmetry is worth understanding, because an unsubscribed
+Provider-owned observers live in `observersRef` until their query is released, or
+`clearCache` or provider unmount destroys them, but they are only **subscribed**
+while a suspend promise is waiting on them. That asymmetry is worth understanding, because an unsubscribed
 observer neither keeps its query in the cache nor hears about it:
 
 - An unsubscribed observer is not notified when the query it holds is rewound in
